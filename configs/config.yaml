@@ -1,0 +1,11 @@
+server:
+  port: 8091
+  mode: debug # debug / release / test
+
+app:
+  name: olixops-k8s-ctl
+  version: 0.1.0
+
+kubernetes:
+  in-cluster: false
+  kubeconfig: ""
