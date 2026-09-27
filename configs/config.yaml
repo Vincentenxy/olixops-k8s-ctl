@@ -1,11 +1,21 @@
 server:
+  host: 127.0.0.1
   port: 8091
   mode: debug # debug / release / test
 
 app:
   name: olixops-k8s-ctl
-  version: 0.1.0
+  version: 0.2.0
 
 kubernetes:
   in-cluster: false
   kubeconfig: ""
+  context: ""
+  write-enabled: true
+  allowed-namespaces: []
+  command-timeout-seconds: 120
+  kubectl: kubectl
+  helm: helm
+
+control:
+  api-key: ""

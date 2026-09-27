@@ -10,7 +10,10 @@ import (
 	"syscall"
 	"time"
 
+	"olixops-k8s-ctl/internal/application"
 	"olixops-k8s-ctl/internal/infrastructure/config"
+	"olixops-k8s-ctl/internal/infrastructure/execctl"
+	clusterk8s "olixops-k8s-ctl/internal/infrastructure/kubernetes"
 	"olixops-k8s-ctl/internal/interfaces/router"
 	"olixops-k8s-ctl/pkg/logger"
 
@@ -27,13 +30,25 @@ func main() {
 	logger.Init(cfg.Server.Mode)
 	defer logger.Sync()
 
-	r, err := router.New(cfg)
+	clusterClient, err := clusterk8s.New(cfg.Kubernetes)
+	if err != nil {
+		logger.L().Fatal("init kubernetes client failed", zap.Error(err))
+	}
+	runner := execctl.New(execctl.Config{
+		Kubeconfig:     cfg.Kubernetes.Kubeconfig,
+		Context:        cfg.Kubernetes.Context,
+		Kubectl:        cfg.Kubernetes.Kubectl,
+		Helm:           cfg.Kubernetes.Helm,
+		TimeoutSeconds: cfg.Kubernetes.CommandTimeoutSecond,
+	})
+	clusterService := application.NewClusterService(clusterClient, runner, cfg.Kubernetes)
+	r, err := router.New(cfg, clusterService)
 	if err != nil {
 		logger.L().Fatal("init router failed", zap.Error(err))
 	}
 
 	srv := &http.Server{
-		Addr:              fmt.Sprintf(":%d", cfg.Server.Port),
+		Addr:              fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port),
 		Handler:           r,
 		ReadHeaderTimeout: 5 * time.Second,
 	}
