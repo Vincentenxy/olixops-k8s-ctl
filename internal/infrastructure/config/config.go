@@ -27,14 +27,20 @@ type AppConfig struct {
 }
 
 type KubernetesConfig struct {
-	InCluster            bool     `mapstructure:"in-cluster"`
-	Kubeconfig           string   `mapstructure:"kubeconfig"`
-	Context              string   `mapstructure:"context"`
-	WriteEnabled         bool     `mapstructure:"write-enabled"`
-	AllowedNamespaces    []string `mapstructure:"allowed-namespaces"`
-	CommandTimeoutSecond int      `mapstructure:"command-timeout-seconds"`
-	Kubectl              string   `mapstructure:"kubectl"`
-	Helm                 string   `mapstructure:"helm"`
+	InCluster            bool             `mapstructure:"in-cluster"`
+	Kubeconfig           KubeconfigConfig `mapstructure:"kubeconfig"`
+	WriteEnabled         bool             `mapstructure:"write-enabled"`
+	AllowedNamespaces    []string         `mapstructure:"allowed-namespaces"`
+	CommandTimeoutSecond int              `mapstructure:"command-timeout-seconds"`
+	Kubectl              string           `mapstructure:"kubectl"`
+	Helm                 string           `mapstructure:"helm"`
+}
+
+type KubeconfigConfig struct {
+	Source    string `mapstructure:"source"`
+	Path      string `mapstructure:"path"`
+	Reference string `mapstructure:"reference"`
+	Context   string `mapstructure:"context"`
 }
 
 type ControlConfig struct {

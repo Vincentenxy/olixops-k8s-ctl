@@ -3,10 +3,9 @@ package kubernetes
 import (
 	"context"
 	"fmt"
-	"os"
-	"path/filepath"
 
 	"olixops-k8s-ctl/internal/infrastructure/config"
+	"olixops-k8s-ctl/internal/infrastructure/kubeconfig"
 
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -69,8 +68,8 @@ type GatewaySnapshot struct {
 	Missing   []string          `json:"missingResources,omitempty"`
 }
 
-func New(cfg config.KubernetesConfig) (*Client, error) {
-	restConfig, err := buildRESTConfig(cfg)
+func New(cfg config.KubernetesConfig, provider kubeconfig.Provider) (*Client, error) {
+	restConfig, err := buildRESTConfig(cfg, provider)
 	if err != nil {
 		return nil, err
 	}
@@ -86,27 +85,31 @@ func New(cfg config.KubernetesConfig) (*Client, error) {
 	if err != nil {
 		return nil, fmt.Errorf("create kubernetes discovery client: %w", err)
 	}
-	return &Client{core: core, dynamic: dynamicClient, discovery: discoveryClient, context: cfg.Context}, nil
+	return &Client{core: core, dynamic: dynamicClient, discovery: discoveryClient, context: cfg.Kubeconfig.Context}, nil
 }
 
-func buildRESTConfig(cfg config.KubernetesConfig) (*rest.Config, error) {
+func buildRESTConfig(cfg config.KubernetesConfig, provider kubeconfig.Provider) (*rest.Config, error) {
 	if cfg.InCluster {
 		return rest.InClusterConfig()
 	}
-	kubeconfig := cfg.Kubeconfig
-	if kubeconfig == "" {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return nil, fmt.Errorf("resolve user home for kubeconfig: %w", err)
-		}
-		kubeconfig = filepath.Join(home, ".kube", "config")
+	if provider == nil {
+		return nil, fmt.Errorf("kubeconfig provider is not configured")
 	}
-	rules := &clientcmd.ClientConfigLoadingRules{ExplicitPath: kubeconfig}
-	overrides := &clientcmd.ConfigOverrides{}
-	if cfg.Context != "" {
-		overrides.CurrentContext = cfg.Context
+	document, err := provider.Load(context.Background(), kubeconfig.Reference{
+		Source:    cfg.Kubeconfig.Source,
+		Path:      cfg.Kubeconfig.Path,
+		Reference: cfg.Kubeconfig.Reference,
+		Context:   cfg.Kubeconfig.Context,
+	})
+	if err != nil {
+		return nil, err
 	}
-	clientConfig := clientcmd.NewNonInteractiveDeferredLoadingClientConfig(rules, overrides)
+	rawConfig, err := clientcmd.Load(document.Bytes)
+	if err != nil {
+		return nil, fmt.Errorf("parse kubeconfig from %s: %w", document.Origin, err)
+	}
+	overrides := &clientcmd.ConfigOverrides{CurrentContext: cfg.Kubeconfig.Context}
+	clientConfig := clientcmd.NewDefaultClientConfig(*rawConfig, overrides)
 	result, err := clientConfig.ClientConfig()
 	if err != nil {
 		return nil, fmt.Errorf("load kubeconfig: %w", err)

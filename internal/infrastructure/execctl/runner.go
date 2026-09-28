@@ -9,11 +9,13 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"olixops-k8s-ctl/internal/infrastructure/kubeconfig"
 )
 
 type Config struct {
-	Kubeconfig     string
-	Context        string
+	Provider       kubeconfig.Provider
+	Reference      kubeconfig.Reference
 	Kubectl        string
 	Helm           string
 	TimeoutSeconds int
@@ -33,7 +35,12 @@ func New(cfg Config) *Runner {
 }
 
 func (r *Runner) KubectlApply(ctx context.Context, manifest, namespace string, serverSide, dryRun bool) (Result, error) {
-	args := r.kubeArgs()
+	kubeconfigPath, contextName, cleanup, err := r.prepareKubeconfig(ctx)
+	if err != nil {
+		return Result{}, err
+	}
+	defer cleanup()
+	args := r.kubeArgs(kubeconfigPath, contextName)
 	args = append(args, "apply", "-f", "-")
 	if namespace != "" {
 		args = append(args, "--namespace", namespace)
@@ -48,6 +55,11 @@ func (r *Runner) KubectlApply(ctx context.Context, manifest, namespace string, s
 }
 
 func (r *Runner) HelmUpgrade(ctx context.Context, release, chart, namespace, valuesYAML string, wait bool) (Result, error) {
+	kubeconfigPath, contextName, cleanupKubeconfig, err := r.prepareKubeconfig(ctx)
+	if err != nil {
+		return Result{}, err
+	}
+	defer cleanupKubeconfig()
 	temporary := ""
 	if strings.TrimSpace(valuesYAML) != "" {
 		directory, err := os.MkdirTemp("", "olixops-k8s-ctl-helm-")
@@ -60,7 +72,7 @@ func (r *Runner) HelmUpgrade(ctx context.Context, release, chart, namespace, val
 			return Result{}, fmt.Errorf("write helm values: %w", err)
 		}
 	}
-	args := r.kubeArgs()
+	args := r.kubeArgs(kubeconfigPath, contextName)
 	args = append(args, "upgrade", "--install", release, chart, "--namespace", namespace, "--create-namespace")
 	if wait {
 		args = append(args, "--wait")
@@ -71,15 +83,46 @@ func (r *Runner) HelmUpgrade(ctx context.Context, release, chart, namespace, val
 	return r.run(ctx, r.cfg.Helm, args, nil)
 }
 
-func (r *Runner) kubeArgs() []string {
+func (r *Runner) kubeArgs(kubeconfigPath, contextName string) []string {
 	args := make([]string, 0, 4)
-	if r.cfg.Kubeconfig != "" {
-		args = append(args, "--kubeconfig", r.cfg.Kubeconfig)
+	if kubeconfigPath != "" {
+		args = append(args, "--kubeconfig", kubeconfigPath)
 	}
-	if r.cfg.Context != "" {
-		args = append(args, "--kube-context", r.cfg.Context)
+	if contextName != "" {
+		args = append(args, "--kube-context", contextName)
 	}
 	return args
+}
+
+func (r *Runner) prepareKubeconfig(ctx context.Context) (string, string, func(), error) {
+	if r.cfg.Provider == nil {
+		return "", "", func() {}, fmt.Errorf("kubeconfig provider is not configured")
+	}
+	document, err := r.cfg.Provider.Load(ctx, r.cfg.Reference)
+	if err != nil {
+		return "", "", func() {}, err
+	}
+	temporary, err := os.CreateTemp("", "olixops-k8s-ctl-kubeconfig-*.yaml")
+	if err != nil {
+		return "", "", func() {}, fmt.Errorf("create temporary kubeconfig: %w", err)
+	}
+	path := temporary.Name()
+	cleanup := func() { _ = os.Remove(path) }
+	if err := temporary.Chmod(0o600); err != nil {
+		_ = temporary.Close()
+		cleanup()
+		return "", "", func() {}, fmt.Errorf("protect temporary kubeconfig: %w", err)
+	}
+	if _, err := temporary.Write(document.Bytes); err != nil {
+		_ = temporary.Close()
+		cleanup()
+		return "", "", func() {}, fmt.Errorf("write temporary kubeconfig: %w", err)
+	}
+	if err := temporary.Close(); err != nil {
+		cleanup()
+		return "", "", func() {}, fmt.Errorf("close temporary kubeconfig: %w", err)
+	}
+	return path, r.cfg.Reference.Context, cleanup, nil
 }
 
 func (r *Runner) run(parent context.Context, binary string, args []string, stdin []byte) (Result, error) {

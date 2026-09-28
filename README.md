@@ -36,14 +36,27 @@ $env:SERVER_PORT = "9091"
 go run ./cmd
 ```
 
-默认从当前用户的 `~/.kube/config` 读取 kubeconfig，并使用当前 context。也可以通过配置或环境变量覆盖：
+默认通过 `file` Provider 从当前用户的 `~/.kube/config` 读取 kubeconfig，并使用当前 context。读取层已经抽象为 `kubeconfig.Provider`；以后数据库只需实现 `DatabaseReader`，即可切换到 `source: database`，client-go、kubectl 和 Helm 的上层逻辑不变。也可以通过配置或环境变量覆盖：
 
 ```powershell
 $env:KUBERNETES_KUBECONFIG = "$env:USERPROFILE\.kube\config"
-$env:KUBERNETES_CONTEXT = "kubernetes-admin@kubernetes"
+$env:KUBERNETES_KUBECONFIG_CONTEXT = "kubernetes-admin@kubernetes"
 $env:KUBERNETES_WRITE_ENABLED = "true"
 go run ./cmd
 ```
+
+配置文件对应结构：
+
+```yaml
+kubernetes:
+  kubeconfig:
+    source: file       # file / database
+    path: ""          # file Provider 为空时使用 ~/.kube/config
+    reference: ""     # database Provider 的配置记录 ID
+    context: ""
+```
+
+当前已实现 file Provider 和数据库 Provider 接口适配层；数据库 Provider 暂不连接业务数据库，后续由数据库模块实现 `ReadKubeconfig(ctx, reference)`，并负责加密存储、权限和轮换。
 
 控制接口默认不要求 API key，因为服务默认绑定 `127.0.0.1`。如果将 `SERVER_HOST` 改为非回环地址，必须配置 `CONTROL_API_KEY`，请求携带 `X-Olixops-Control-Key`。生产环境不能在公网暴露未配置认证的控制接口。
 
@@ -72,7 +85,7 @@ cmd/                         服务入口
 configs/                     Viper 配置
 internal/application/        Kubernetes 控制用例、清单校验和权限边界
 internal/domain/             Kubernetes 领域契约（持续扩展）
-internal/infrastructure/    kubeconfig、client-go、kubectl/Helm 适配
+internal/infrastructure/    kubeconfig Provider、client-go、kubectl/Helm 适配
 internal/interfaces/         HTTP handler、middleware、router
 pkg/logger/                  Zap 日志
 pkg/response/                统一响应

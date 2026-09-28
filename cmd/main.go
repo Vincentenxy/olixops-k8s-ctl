@@ -13,6 +13,7 @@ import (
 	"olixops-k8s-ctl/internal/application"
 	"olixops-k8s-ctl/internal/infrastructure/config"
 	"olixops-k8s-ctl/internal/infrastructure/execctl"
+	"olixops-k8s-ctl/internal/infrastructure/kubeconfig"
 	clusterk8s "olixops-k8s-ctl/internal/infrastructure/kubernetes"
 	"olixops-k8s-ctl/internal/interfaces/router"
 	"olixops-k8s-ctl/pkg/logger"
@@ -30,13 +31,23 @@ func main() {
 	logger.Init(cfg.Server.Mode)
 	defer logger.Sync()
 
-	clusterClient, err := clusterk8s.New(cfg.Kubernetes)
+	kubeconfigReference := kubeconfig.Reference{
+		Source:    cfg.Kubernetes.Kubeconfig.Source,
+		Path:      cfg.Kubernetes.Kubeconfig.Path,
+		Reference: cfg.Kubernetes.Kubeconfig.Reference,
+		Context:   cfg.Kubernetes.Kubeconfig.Context,
+	}
+	kubeconfigProvider, err := kubeconfig.NewProvider(kubeconfigReference, nil)
+	if err != nil {
+		logger.L().Fatal("init kubeconfig provider failed", zap.Error(err))
+	}
+	clusterClient, err := clusterk8s.New(cfg.Kubernetes, kubeconfigProvider)
 	if err != nil {
 		logger.L().Fatal("init kubernetes client failed", zap.Error(err))
 	}
 	runner := execctl.New(execctl.Config{
-		Kubeconfig:     cfg.Kubernetes.Kubeconfig,
-		Context:        cfg.Kubernetes.Context,
+		Provider:       kubeconfigProvider,
+		Reference:      kubeconfigReference,
 		Kubectl:        cfg.Kubernetes.Kubectl,
 		Helm:           cfg.Kubernetes.Helm,
 		TimeoutSeconds: cfg.Kubernetes.CommandTimeoutSecond,

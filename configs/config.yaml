@@ -9,8 +9,11 @@ app:
 
 kubernetes:
   in-cluster: false
-  kubeconfig: ""
-  context: ""
+  kubeconfig:
+    source: file
+    path: ""
+    reference: ""
+    context: ""
   write-enabled: true
   allowed-namespaces: []
   command-timeout-seconds: 120
