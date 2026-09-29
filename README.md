@@ -39,7 +39,7 @@ go run ./cmd
 默认通过 `file` Provider 从当前用户的 `~/.kube/config` 读取 kubeconfig，并使用当前 context。读取层已经抽象为 `kubeconfig.Provider`；以后数据库只需实现 `DatabaseReader`，即可切换到 `source: database`，client-go、kubectl 和 Helm 的上层逻辑不变。也可以通过配置或环境变量覆盖：
 
 ```powershell
-$env:KUBERNETES_KUBECONFIG = "$env:USERPROFILE\.kube\config"
+$env:KUBERNETES_KUBECONFIG_PATH = "$env:USERPROFILE\.kube\config"
 $env:KUBERNETES_KUBECONFIG_CONTEXT = "kubernetes-admin@kubernetes"
 $env:KUBERNETES_WRITE_ENABLED = "true"
 go run ./cmd
