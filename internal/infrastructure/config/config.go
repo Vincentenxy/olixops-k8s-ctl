@@ -12,7 +12,13 @@ type Config struct {
 	Server     ServerConfig     `mapstructure:"server"`
 	App        AppConfig        `mapstructure:"app"`
 	Kubernetes KubernetesConfig `mapstructure:"kubernetes"`
+	MCP        MCPConfig        `mapstructure:"mcp"`
 	Control    ControlConfig    `mapstructure:"control"`
+}
+
+type MCPConfig struct {
+	Enabled      bool `mapstructure:"enabled"`
+	WriteEnabled bool `mapstructure:"write-enabled"`
 }
 
 type ServerConfig struct {

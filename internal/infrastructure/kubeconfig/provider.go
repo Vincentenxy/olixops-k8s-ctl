@@ -6,11 +6,14 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"k8s.io/client-go/tools/clientcmd"
 )
 
 const (
-	SourceFile     = "file"
-	SourceDatabase = "database"
+	SourceInCluster = "in-cluster"
+	SourceFile      = "file"
+	SourceDatabase  = "database"
 )
 
 type Reference struct {
@@ -48,6 +51,30 @@ func (p *FileProvider) Load(_ context.Context, reference Reference) (Document, e
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return Document{}, fmt.Errorf("read kubeconfig file: %w", err)
+	}
+	// Resolve references here, while the original file location is still known.
+	// CLI adapters receive a temporary document and must not know its source path.
+	config, err := clientcmd.Load(data)
+	if err != nil {
+		return Document{}, fmt.Errorf("parse kubeconfig file")
+	}
+	hasReferences := false
+	for _, cluster := range config.Clusters {
+		cluster.LocationOfOrigin = path
+		hasReferences = hasReferences || cluster.CertificateAuthority != ""
+	}
+	for _, user := range config.AuthInfos {
+		user.LocationOfOrigin = path
+		hasReferences = hasReferences || user.ClientCertificate != "" || user.ClientKey != "" || user.TokenFile != ""
+	}
+	if hasReferences {
+		if err := clientcmd.ResolveLocalPaths(config); err != nil {
+			return Document{}, fmt.Errorf("resolve kubeconfig file references")
+		}
+		data, err = clientcmd.Write(*config)
+		if err != nil {
+			return Document{}, fmt.Errorf("encode kubeconfig file references")
+		}
 	}
 	return Document{Bytes: data, Origin: path}, nil
 }
@@ -102,6 +129,8 @@ func NewProvider(reference Reference, reader DatabaseReader) (Provider, error) {
 		source = SourceFile
 	}
 	switch source {
+	case SourceInCluster:
+		return &InClusterProvider{}, nil
 	case SourceFile:
 		return NewFileProvider(), nil
 	case SourceDatabase:

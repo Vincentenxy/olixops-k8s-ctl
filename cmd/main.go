@@ -37,6 +37,11 @@ func main() {
 		Reference: cfg.Kubernetes.Kubeconfig.Reference,
 		Context:   cfg.Kubernetes.Kubeconfig.Context,
 	}
+	if cfg.Kubernetes.InCluster {
+		kubeconfigReference = kubeconfig.Reference{Source: kubeconfig.SourceInCluster}
+		cfg.Kubernetes.Kubeconfig.Source = kubeconfig.SourceInCluster
+		cfg.Kubernetes.Kubeconfig.Context = ""
+	}
 	kubeconfigProvider, err := kubeconfig.NewProvider(kubeconfigReference, nil)
 	if err != nil {
 		logger.L().Fatal("init kubeconfig provider failed", zap.Error(err))

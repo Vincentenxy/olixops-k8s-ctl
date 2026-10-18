@@ -3,6 +3,7 @@ package kubernetes
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"olixops-k8s-ctl/internal/infrastructure/config"
 	"olixops-k8s-ctl/internal/infrastructure/kubeconfig"
@@ -73,6 +74,8 @@ func New(cfg config.KubernetesConfig, provider kubeconfig.Provider) (*Client, er
 	if err != nil {
 		return nil, err
 	}
+	// Bound discovery calls as well as ordinary client requests.
+	restConfig.Timeout = 30 * time.Second
 	core, err := kubernetes.NewForConfig(restConfig)
 	if err != nil {
 		return nil, fmt.Errorf("create kubernetes client: %w", err)
@@ -89,9 +92,6 @@ func New(cfg config.KubernetesConfig, provider kubeconfig.Provider) (*Client, er
 }
 
 func buildRESTConfig(cfg config.KubernetesConfig, provider kubeconfig.Provider) (*rest.Config, error) {
-	if cfg.InCluster {
-		return rest.InClusterConfig()
-	}
 	if provider == nil {
 		return nil, fmt.Errorf("kubeconfig provider is not configured")
 	}
@@ -221,16 +221,30 @@ func (c *Client) ListGatewayResources(ctx context.Context, namespace string) (Ga
 	}{
 		{name: "GatewayClass", resource: schema.GroupVersionResource{Group: "gateway.networking.k8s.io", Version: "v1", Resource: "gatewayclasses"}},
 		{name: "Gateway", resource: schema.GroupVersionResource{Group: "gateway.networking.k8s.io", Version: "v1", Resource: "gateways"}, namespaced: true},
-		{name: "TCPRoute", resource: schema.GroupVersionResource{Group: "gateway.networking.k8s.io", Version: "v1", Resource: "tcproutes"}, namespaced: true},
+		{name: "HTTPRoute", resource: schema.GroupVersionResource{Group: "gateway.networking.k8s.io", Version: "v1", Resource: "httproutes"}, namespaced: true},
+		{name: "TCPRoute", resource: schema.GroupVersionResource{Group: "gateway.networking.k8s.io", Version: "v1alpha2", Resource: "tcproutes"}, namespaced: true},
 	}
 	result := GatewaySnapshot{}
 	for _, item := range resources {
 		var list *unstructured.UnstructuredList
 		var err error
-		if item.namespaced {
-			list, err = c.dynamic.Resource(item.resource).Namespace(namespace).List(ctx, metav1.ListOptions{})
-		} else {
-			list, err = c.dynamic.Resource(item.resource).List(ctx, metav1.ListOptions{})
+		versions := []string{item.resource.Version}
+		for _, version := range []string{"v1", "v1beta1", "v1alpha2"} {
+			if version != item.resource.Version {
+				versions = append(versions, version)
+			}
+		}
+		for _, version := range versions {
+			gvr := item.resource
+			gvr.Version = version
+			if item.namespaced {
+				list, err = c.dynamic.Resource(gvr).Namespace(namespace).List(ctx, metav1.ListOptions{})
+			} else {
+				list, err = c.dynamic.Resource(gvr).List(ctx, metav1.ListOptions{})
+			}
+			if !errors.IsNotFound(err) && !errors.IsMethodNotSupported(err) {
+				break
+			}
 		}
 		if err != nil {
 			if errors.IsNotFound(err) || errors.IsMethodNotSupported(err) {

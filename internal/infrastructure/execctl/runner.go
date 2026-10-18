@@ -4,10 +4,9 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
-	"path/filepath"
-	"strings"
 	"time"
 
 	"olixops-k8s-ctl/internal/infrastructure/kubeconfig"
@@ -31,6 +30,15 @@ type Runner struct {
 }
 
 func New(cfg Config) *Runner {
+	if cfg.TimeoutSeconds < 1 {
+		cfg.TimeoutSeconds = 120
+	}
+	if cfg.Kubectl == "" {
+		cfg.Kubectl = "kubectl"
+	}
+	if cfg.Helm == "" {
+		cfg.Helm = "helm"
+	}
 	return &Runner{cfg: cfg}
 }
 
@@ -40,7 +48,7 @@ func (r *Runner) KubectlApply(ctx context.Context, manifest, namespace string, s
 		return Result{}, err
 	}
 	defer cleanup()
-	args := r.kubeArgs(kubeconfigPath, contextName)
+	args := r.kubeArgs(kubeconfigPath, contextName, false)
 	args = append(args, "apply", "-f", "-")
 	if namespace != "" {
 		args = append(args, "--namespace", namespace)
@@ -51,45 +59,21 @@ func (r *Runner) KubectlApply(ctx context.Context, manifest, namespace string, s
 	if dryRun {
 		args = append(args, "--dry-run=server")
 	}
-	return r.run(ctx, r.cfg.Kubectl, args, []byte(manifest))
-}
-
-func (r *Runner) HelmUpgrade(ctx context.Context, release, chart, namespace, valuesYAML string, wait bool) (Result, error) {
-	kubeconfigPath, contextName, cleanupKubeconfig, err := r.prepareKubeconfig(ctx)
+	_, err = r.runRaw(ctx, r.cfg.Kubectl, args, []byte(manifest))
 	if err != nil {
 		return Result{}, err
 	}
-	defer cleanupKubeconfig()
-	temporary := ""
-	if strings.TrimSpace(valuesYAML) != "" {
-		directory, err := os.MkdirTemp("", "olixops-k8s-ctl-helm-")
-		if err != nil {
-			return Result{}, fmt.Errorf("create helm values directory: %w", err)
-		}
-		defer os.RemoveAll(directory)
-		temporary = filepath.Join(directory, "values.yaml")
-		if err := os.WriteFile(temporary, []byte(valuesYAML), 0o600); err != nil {
-			return Result{}, fmt.Errorf("write helm values: %w", err)
-		}
-	}
-	args := r.kubeArgs(kubeconfigPath, contextName)
-	args = append(args, "upgrade", "--install", release, chart, "--namespace", namespace, "--create-namespace")
-	if wait {
-		args = append(args, "--wait")
-	}
-	if temporary != "" {
-		args = append(args, "--values", temporary)
-	}
-	return r.run(ctx, r.cfg.Helm, args, nil)
+	return Result{Output: "kubectl apply completed"}, nil
 }
 
-func (r *Runner) kubeArgs(kubeconfigPath, contextName string) []string {
-	args := make([]string, 0, 4)
-	if kubeconfigPath != "" {
-		args = append(args, "--kubeconfig", kubeconfigPath)
-	}
+func (r *Runner) kubeArgs(kubeconfigPath, contextName string, helm bool) []string {
+	args := []string{"--kubeconfig", kubeconfigPath}
 	if contextName != "" {
-		args = append(args, "--kube-context", contextName)
+		flag := "--context"
+		if helm {
+			flag = "--kube-context"
+		}
+		args = append(args, flag, contextName)
 	}
 	return args
 }
@@ -125,38 +109,44 @@ func (r *Runner) prepareKubeconfig(ctx context.Context) (string, string, func(),
 	return path, r.cfg.Reference.Context, cleanup, nil
 }
 
-func (r *Runner) run(parent context.Context, binary string, args []string, stdin []byte) (Result, error) {
-	timeout := time.Duration(r.cfg.TimeoutSeconds) * time.Second
-	ctx, cancel := context.WithTimeout(parent, timeout)
+// cappedBuffer bounds memory during execution, not just after capture.
+type cappedBuffer struct {
+	bytes.Buffer
+	limit    int
+	overflow bool
+}
+
+func (b *cappedBuffer) Write(p []byte) (int, error) {
+	n := len(p)
+	remaining := b.limit - b.Len()
+	if len(p) > remaining {
+		p = p[:remaining]
+		b.overflow = true
+	}
+	_, _ = b.Buffer.Write(p)
+	return n, nil
+}
+
+func (r *Runner) runRaw(parent context.Context, binary string, args []string, stdin []byte) ([]byte, error) {
+	ctx, cancel := context.WithTimeout(parent, time.Duration(r.cfg.TimeoutSeconds)*time.Second)
 	defer cancel()
 	command := exec.CommandContext(ctx, binary, args...)
+	command.WaitDelay = time.Second
 	if stdin != nil {
 		command.Stdin = bytes.NewReader(stdin)
 	}
-	output, err := command.CombinedOutput()
-	result := Result{Command: binary + " " + strings.Join(redactArgs(args), " "), Output: truncate(string(output), 16*1024)}
-	if ctx.Err() != nil {
-		return result, fmt.Errorf("command timeout: %w", ctx.Err())
-	}
-	if err != nil {
-		return result, fmt.Errorf("command failed: %w", err)
-	}
-	return result, nil
-}
-
-func redactArgs(args []string) []string {
-	result := append([]string(nil), args...)
-	for index := range result {
-		if result[index] == "--values" && index+1 < len(result) {
-			result[index+1] = "<temporary-values>"
+	output := &cappedBuffer{limit: 8 << 20}
+	command.Stdout = output
+	// stderr can contain credentials, rendered values or server addresses.
+	command.Stderr = io.Discard
+	if err := command.Run(); err != nil {
+		if ctx.Err() != nil {
+			return nil, fmt.Errorf("command timed out or was canceled")
 		}
+		return nil, fmt.Errorf("external command failed")
 	}
-	return result
-}
-
-func truncate(value string, max int) string {
-	if len(value) <= max {
-		return value
+	if output.overflow {
+		return nil, fmt.Errorf("command output exceeds 8 MiB")
 	}
-	return value[:max] + "\n<output truncated>"
+	return output.Bytes(), nil
 }

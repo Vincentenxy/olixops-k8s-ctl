@@ -44,3 +44,15 @@ func TestDatabaseKubeconfigProvider(t *testing.T) {
 	require.Equal(t, []byte("database-config"), document.Bytes)
 	require.Equal(t, "database:cluster-1", document.Origin)
 }
+
+func TestFileKubeconfigRelativeReferencesSurviveTemporaryCopy(t *testing.T) {
+	directory := t.TempDir()
+	path := filepath.Join(directory, "config")
+	data := []byte("apiVersion: v1\nkind: Config\nclusters:\n- name: test\n  cluster:\n    server: https://example.invalid\n    certificate-authority: ca.crt\nusers:\n- name: test\n  user:\n    client-certificate: cert.pem\n    client-key: key.pem\n    tokenFile: token\n")
+	require.NoError(t, os.WriteFile(path, data, 0o600))
+	document, err := kubeconfig.NewFileProvider().Load(context.Background(), kubeconfig.Reference{Path: path})
+	require.NoError(t, err)
+	for _, name := range []string{"ca.crt", "cert.pem", "key.pem", "token"} {
+		require.Contains(t, string(document.Bytes), filepath.Join(directory, name))
+	}
+}
