@@ -47,6 +47,7 @@ type Service interface {
 	UninstallHelm(context.Context, string, string, bool) (execctl.Result, error)
 	CreateNamespace(context.Context, string) (clusterk8s.MutationResult, error)
 	DeleteNamespace(context.Context, string) (clusterk8s.MutationResult, error)
+	UpdateNamespaceMetadata(context.Context, string, application.NamespaceMetadataChanges) (clusterk8s.MutationResult, error)
 	UpdateConfigMap(context.Context, string, string, map[string]string) (clusterk8s.MutationResult, error)
 }
 

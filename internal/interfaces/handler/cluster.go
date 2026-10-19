@@ -1,6 +1,8 @@
 package handler
 
 import (
+	"encoding/json"
+	"io"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -89,6 +91,38 @@ type HelmUpgradeRequest struct {
 	Namespace  string `json:"namespace" binding:"required"`
 	ValuesYAML string `json:"valuesYaml"`
 	Wait       bool   `json:"wait"`
+}
+
+type NamespaceMetadataRequest struct {
+	Labels            map[string]string `json:"labels,omitempty"`
+	Annotations       map[string]string `json:"annotations,omitempty"`
+	RemoveLabels      []string          `json:"removeLabels,omitempty"`
+	RemoveAnnotations []string          `json:"removeAnnotations,omitempty"`
+}
+
+func (h *ClusterHandler) UpdateNamespaceMetadata(c *gin.Context) {
+	var request NamespaceMetadataRequest
+	decoder := json.NewDecoder(c.Request.Body)
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&request); err != nil {
+		response.AbortWithHTTPStatus(c, http.StatusBadRequest)
+		return
+	}
+	if err := decoder.Decode(&struct{}{}); err != io.EOF {
+		response.AbortWithHTTPStatus(c, http.StatusBadRequest)
+		return
+	}
+	result, err := h.service.UpdateNamespaceMetadata(c.Request.Context(), c.Param("namespace"), application.NamespaceMetadataChanges{
+		Labels:            request.Labels,
+		Annotations:       request.Annotations,
+		RemoveLabels:      request.RemoveLabels,
+		RemoveAnnotations: request.RemoveAnnotations,
+	})
+	if err != nil {
+		h.clientError(c, err)
+		return
+	}
+	response.Success(c, gin.H{"result": result})
 }
 
 func (h *ClusterHandler) HelmUpgrade(c *gin.Context) {

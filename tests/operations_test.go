@@ -278,8 +278,8 @@ func TestMCPOperationsEndToEnd(t *testing.T) {
 	session := f.session(t)
 	tools, err := session.ListTools(context.Background(), nil)
 	require.NoError(t, err)
-	require.Len(t, tools.Tools, 27)
-	writes := map[string]bool{"dry_run_manifest": true, "apply_manifest": true, "helm_upgrade": true, "scale_workload": true, "restart_workload": true, "rollback_workload": true, "delete_resource": true, "helm_rollback": true, "helm_uninstall": true, "create_namespace": true, "delete_namespace": true, "update_configmap": true}
+	require.Len(t, tools.Tools, 28)
+	writes := map[string]bool{"dry_run_manifest": true, "apply_manifest": true, "helm_upgrade": true, "scale_workload": true, "restart_workload": true, "rollback_workload": true, "delete_resource": true, "helm_rollback": true, "helm_uninstall": true, "create_namespace": true, "delete_namespace": true, "update_namespace_metadata": true, "update_configmap": true}
 	for _, tool := range tools.Tools {
 		require.Equal(t, !writes[tool.Name], tool.Annotations.ReadOnlyHint, tool.Name)
 		if writes[tool.Name] && tool.Name != "dry_run_manifest" && tool.Name != "create_namespace" {
@@ -324,6 +324,7 @@ func TestMCPOperationsEndToEnd(t *testing.T) {
 	call("rollback_workload", map[string]any{"namespace": "demo", "kind": "Deployment", "name": "web", "revision": 1})
 	call("delete_resource", map[string]any{"namespace": "demo", "kind": "Pod", "name": "web-0"})
 	call("update_configmap", map[string]any{"namespace": "demo", "name": "web", "data": map[string]string{"mode": "demo"}})
+	call("update_namespace_metadata", map[string]any{"namespace": "demo", "labels": map[string]string{"environment": "test"}, "annotations": map[string]string{"owner": "platform"}, "removeLabels": []string{"old-label"}})
 	call("create_namespace", map[string]any{"namespace": "demo"})
 	call("delete_namespace", map[string]any{"namespace": "demo"})
 	for _, name := range []string{"helm_upgrade", "helm_rollback", "helm_uninstall"} {
@@ -340,7 +341,7 @@ func TestMCPOperationsEndToEnd(t *testing.T) {
 	}
 
 	requests := f.api.snapshot()
-	var scaledZero, scaledThree, deletedPod, deletedNS, restarted, updated bool
+	var scaledZero, scaledThree, deletedPod, deletedNS, restarted, updated, updatedNamespace bool
 	for _, r := range requests {
 		if strings.HasSuffix(r.Path, "/scale") && r.Method == "PUT" {
 			var body map[string]any
@@ -373,6 +374,10 @@ func TestMCPOperationsEndToEnd(t *testing.T) {
 			require.JSONEq(t, `{"data":{"mode":"demo"}}`, string(r.Body))
 			updated = true
 		}
+		if r.Path == "/api/v1/namespaces/demo" && r.Method == "PATCH" {
+			require.JSONEq(t, `{"metadata":{"annotations":{"owner":"platform"},"labels":{"environment":"test","old-label":null}}}`, string(r.Body))
+			updatedNamespace = true
+		}
 		if strings.HasSuffix(r.Path, "/log") {
 			require.Contains(t, r.Query, "tailLines=50")
 			require.Contains(t, r.Query, "sinceSeconds=60")
@@ -384,7 +389,7 @@ func TestMCPOperationsEndToEnd(t *testing.T) {
 			require.Contains(t, r.Query, "labelSelector=app%3Dweb")
 		}
 	}
-	require.True(t, scaledZero && scaledThree && deletedPod && deletedNS && restarted && updated)
+	require.True(t, scaledZero && scaledThree && deletedPod && deletedNS && restarted && updated && updatedNamespace)
 	commands := readCommands(t, f.commandLog)
 	var applyCount, dryCount int
 	var downloaded, rendered, upgraded bool
@@ -440,9 +445,46 @@ func TestMCPOperationsEndToEnd(t *testing.T) {
 			require.NotEmpty(t, request.Targets)
 		}
 	}
-	for _, action := range []string{"workload.history", "resource.get", "resource.list", "event.list", "pod.logs", "helm.list", "helm.status", "helm.history", "manifest.preview", "manifest.apply", "helm.upgrade", "workload.scale", "workload.restart", "workload.rollback", "resource.delete", "helm.rollback", "helm.uninstall", "namespace.create", "namespace.delete", "configmap.update"} {
+	for _, action := range []string{"workload.history", "resource.get", "resource.list", "event.list", "pod.logs", "helm.list", "helm.status", "helm.history", "manifest.preview", "manifest.apply", "helm.upgrade", "workload.scale", "workload.restart", "workload.rollback", "resource.delete", "helm.rollback", "helm.uninstall", "namespace.create", "namespace.delete", "namespace.update", "configmap.update"} {
 		require.True(t, actions[action], action)
 	}
+}
+
+func TestNamespaceMetadataREST(t *testing.T) {
+	f := newOperationFixture(t)
+	f.cfg.Control.APIKey = "rest-key"
+	engine, err := router.New(f.cfg, f.service)
+	require.NoError(t, err)
+	server := httptest.NewServer(engine)
+	defer server.Close()
+
+	req, err := http.NewRequest(http.MethodPost, server.URL+"/api/v1/cluster/namespaces/demo/metadata", strings.NewReader(`{"labels":{"team":"platform"},"annotations":{"owner":"ops"}}`))
+	require.NoError(t, err)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Olixops-Control-Key", "rest-key")
+	response, err := http.DefaultClient.Do(req)
+	require.NoError(t, err)
+	defer response.Body.Close()
+	require.Equal(t, http.StatusOK, response.StatusCode)
+
+	invalid, err := http.NewRequest(http.MethodPost, server.URL+"/api/v1/cluster/namespaces/demo/metadata", strings.NewReader(`{"labels":{"team":"platform"},"spec":{"finalizers":[]}}`))
+	require.NoError(t, err)
+	invalid.Header.Set("Content-Type", "application/json")
+	invalid.Header.Set("X-Olixops-Control-Key", "rest-key")
+	invalidResponse, err := http.DefaultClient.Do(invalid)
+	require.NoError(t, err)
+	invalidResponse.Body.Close()
+	require.Equal(t, http.StatusBadRequest, invalidResponse.StatusCode)
+
+	requests := f.api.snapshot()
+	var patched bool
+	for _, request := range requests {
+		if request.Path == "/api/v1/namespaces/demo" && request.Method == http.MethodPatch {
+			require.JSONEq(t, `{"metadata":{"annotations":{"owner":"ops"},"labels":{"team":"platform"}}}`, string(request.Body))
+			patched = true
+		}
+	}
+	require.True(t, patched)
 }
 
 func TestOperationGuardsAndReservedAuthorization(t *testing.T) {
@@ -463,6 +505,8 @@ func TestOperationGuardsAndReservedAuthorization(t *testing.T) {
 		{"delete_resource", map[string]any{"namespace": "demo", "kind": "Pod", "name": "../../private"}},
 		{"delete_namespace", map[string]any{"namespace": "default"}},
 		{"create_namespace", map[string]any{"namespace": "private"}},
+		{"update_namespace_metadata", map[string]any{"namespace": "demo", "labels": map[string]string{"../invalid": "x"}}},
+		{"update_namespace_metadata", map[string]any{"namespace": "demo", "labels": map[string]string{"environment": "test"}, "removeLabels": []string{"environment"}}},
 		{"update_configmap", map[string]any{"namespace": "demo", "name": "web", "data": map[string]string{"../invalid": "x"}}},
 		{"get_pod_logs", map[string]any{"namespace": "demo", "pod": "web-0", "tailLines": -1}},
 		{"get_pod_logs", map[string]any{"namespace": "demo", "pod": "web-0", "container": "--follow"}},
@@ -500,6 +544,7 @@ func TestOperationGuardsAndReservedAuthorization(t *testing.T) {
 		{"helm_uninstall", map[string]any{"namespace": "demo", "release": "web"}},
 		{"create_namespace", map[string]any{"namespace": "demo"}},
 		{"delete_namespace", map[string]any{"namespace": "demo"}},
+		{"update_namespace_metadata", map[string]any{"namespace": "demo", "labels": map[string]string{"environment": "test"}}},
 		{"update_configmap", map[string]any{"namespace": "demo", "name": "web", "data": map[string]string{"key": "value"}}},
 		{"get_pod_logs", map[string]any{"namespace": "demo", "pod": "web-0"}},
 	} {
@@ -527,6 +572,8 @@ func TestMCPGlobalWriteSwitch(t *testing.T) {
 	_, err = disabled.DeleteResource(context.Background(), "demo", "Pod", "web-0")
 	require.ErrorContains(t, err, "disabled")
 	_, err = disabled.DeleteNamespace(context.Background(), "demo")
+	require.ErrorContains(t, err, "disabled")
+	_, err = disabled.UpdateNamespaceMetadata(context.Background(), "demo", application.NamespaceMetadataChanges{Labels: map[string]string{"environment": "test"}})
 	require.ErrorContains(t, err, "disabled")
 	require.Empty(t, f.api.snapshot())
 	require.Empty(t, readCommands(t, f.commandLog))

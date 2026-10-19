@@ -88,6 +88,7 @@ Authorizer：身份、角色、作用域、内容策略、必要审批
 | helm.rollback | 当前与目标 release/revision/资源集合 |
 | helm.uninstall | release 及将被删除的所有资源 |
 | namespace.create | 新 Namespace 及后续归属信息 |
+| namespace.update | 仅 Namespace labels/annotations 的设置与显式删除键，不允许修改其他 metadata/spec/status 字段 |
 | namespace.delete | 整个 Namespace 与全部子资源的删除权，不可沿用单资源删除权 |
 
 YAML apply 可以绕过独立工具完成扩缩容、重启和配置更新。需要二选一并明确：把 manifest.apply 定义成范围内完整配置修改权，或者对 diff 做字段级授权，再分别检查 workload.scale/configmap.update 等动作；不能假设只限制 scale 工具就能禁止通过 YAML 缩容。

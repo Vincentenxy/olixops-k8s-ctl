@@ -4,7 +4,7 @@
 
 ## 当前结果
 
-已接入官方 Go SDK v1.8.0 和 stateless Streamable HTTP。当前有 **15 个只读工具、12 个写工具，共 27 个工具**；默认只注册只读工具，写工具通过配置独立启用。
+已接入官方 Go SDK v1.8.0 和 stateless Streamable HTTP。当前有 **15 个只读工具、13 个写工具，共 28 个工具**；默认只注册只读工具，写工具通过配置独立启用。
 
 本轮按用户要求先完成操作能力，**身份认证、角色、权限策略、审批和完整审计尚未实现**。业务层已预留可替换的 `domain.Authorizer`，默认 `DeferredAuthorizer` 明确放行。开关、参数校验、资源白名单和 Namespace 范围检查均不是用户权限系统。
 
@@ -75,8 +75,8 @@ MCP_ENABLED=false go run ./cmd
 | mcp.write-enabled | kubernetes.write-enabled | 行为 |
 | --- | --- | --- |
 | false | 任意 | 仅注册 15 个读工具，写工具不存在 |
-| true | false | 注册 27 个工具，但写调用被业务层拒绝 |
-| true | true | 27 个工具可调用，仍受固定集群、Namespace、资源与参数检查；权限占位当前放行 |
+| true | false | 注册 28 个工具，但写调用被业务层拒绝 |
+| true | true | 28 个工具可调用，仍受固定集群、Namespace、资源与参数检查；权限占位当前放行 |
 
 `allowed-namespaces: []` 沿用原语义：允许所有 Namespace。生产权限阶段将另行设计用户的显式作用域，不能把这个空列表当作默认拒绝。
 
@@ -126,7 +126,7 @@ Helm 查询只序列化固定摘要字段，不返回 values/config、manifest�
 
 Gateway 专用列表在 NotFound/MethodNotSupported 时回退版本，Forbidden 等直接失败。通用详情/删除通过 discovery 在该 kind 的固定版本列表内选取已服务且 namespaced 的资源，不接受任意 GVR。
 
-## 写工具（12 个，均已实现）
+## 写工具（13 个，均已实现）
 
 每个工具都经过业务层写总开关、Namespace/资源检查和预留 Authorizer。只有开启 MCP 写开关才注册。
 
@@ -143,6 +143,7 @@ Gateway 专用列表在 NotFound/MethodNotSupported 时回退版本，Forbidden 
 | `helm_uninstall` | `namespace, release, wait?` | 卸载及删除 release 关联资源 | `helm.uninstall` |
 | `create_namespace` | `namespace` | 创建配置允许范围内的 Namespace | `namespace.create` |
 | `delete_namespace` | `namespace` | 删除整个 Namespace 及其内容；禁止 default 和 kube-* | `namespace.delete` |
+| `update_namespace_metadata` | `namespace, labels?, annotations?, removeLabels?, removeAnnotations?` | 只更新 Namespace 的 labels/annotations；显式 remove 列表删除键，其他字段不可修改 | `namespace.update` |
 | `update_configmap` | `namespace, name, data` | merge patch 已有 ConfigMap 的指定 data 键，保留其他键，不自动重启 | `configmap.update` |
 
 删除返回 accepted 不表示 finalizer 已完成或 PVC 数据仍保留。Namespace 删除是显式的大范围操作，会删除其中的所有类型资源，不能把通用单资源白名单解释为它的子资源授权。回滚、扩缩容、重启返回请求结果，随后通过状态/事件/日志查询确认。滚动重启受 StatefulSet/DaemonSet 的 OnDelete、partition 等策略影响，未必立即替换所有 Pod；HPA 也可能覆盖手动扩缩容。
@@ -166,7 +167,7 @@ YAML apply、通用详情/列表/删除共享 `internal/domain/resources.go` 的
 | gateway.networking.k8s.io/v1 或 v1beta1 | Gateway、HTTPRoute |
 | gateway.networking.k8s.io/v1alpha2 或 v1 | TCPRoute，具体取决于集群实际服务版本 |
 
-Namespace 只通过专用工具管理。Secret、RBAC、CRD、任意集群级资源不在通用白名单；不提供任意 shell/kubectl/Helm 参数、Pod exec、kubeconfig 导出或节点管理。名称不接受路径、标志位等注入内容。
+Namespace 只通过专用工具管理。Namespace 元数据工具只处理 `metadata.labels` 和 `metadata.annotations`，不接受 `spec`、`status`、`finalizers`、名称或 Namespace 迁移等字段。Secret、RBAC、CRD、任意集群级资源不在通用白名单；不提供任意 shell/kubectl/Helm 参数、Pod exec、kubeconfig 导出或节点管理。名称不接受路径、标志位等注入内容。
 
 ## Helm 执行细节与限制
 
@@ -217,6 +218,10 @@ curl -sS http://127.0.0.1:8091/api/v1/pub/mcp \
 {"jsonrpc":"2.0","id":6,"method":"tools/call","params":{"name":"helm_upgrade","arguments":{"namespace":"default","release":"nginx-demo","chart":"demo/nginx","version":"1.0.0","valuesYaml":"replicaCount: 1\n","wait":true}}}
 ```
 
+```json
+{"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"update_namespace_metadata","arguments":{"namespace":"nginx-demo","labels":{"environment":"test"},"annotations":{"owner":"platform"},"removeLabels":["old-label"]}}}
+```
+
 上述 chart 为占位示例，需替换成运行环境已配置的仓库/OCI chart，并确保其模板满足白名单。Namespace 必须存在（或先 create_namespace）且符合配置范围。
 
 建议 nginx 验收链路：validate_manifest → dry_run_manifest → apply_manifest → get_rollout_status → list_resource_objects(kind=Pod) → get_pod_logs/list_events → scale_workload/restart_workload → get_workload_history/rollback_workload → delete_resource。删除 Deployment 和 Service 不等于卸载 Helm release；用对应的管理方式清理资源。
@@ -225,7 +230,7 @@ curl -sS http://127.0.0.1:8091/api/v1/pub/mcp \
 
 测试使用真实 SDK 客户端，经 Gin → MCP → application → 模拟 Kubernetes HTTP。外部命令使用测试程序自身作为独立子进程，验证 argv、stdin、临时文件权限与清理，不执行真实 kubectl/Helm 或连接用户集群。
 
-覆盖：默认 15 个读工具、启用后 27 个工具、读写标注、各功能调用、缩容到 0、scale 乐观锁、删除 UID precondition、扩容/重启/回滚参数、日志参数及 256 KiB 上限、分页/事件、历史资源归属过滤、Helm 阶段与输出过滤、跨 Namespace/Secret/GVK/参数注入拒绝、全局写总开关、权限占位可替换且拒绝发生在副作用前、旧 REST 方法共用占位、CLI 失败/取消、配置环境变量、MCP 关闭、请求 ID 与跨站保护、相对 kubeconfig 引用。
+覆盖：默认 15 个读工具、启用后 28 个工具、读写标注、各功能调用、Namespace 元数据 patch、缩容到 0、scale 乐观锁、删除 UID precondition、扩容/重启/回滚参数、日志参数及 256 KiB 上限、分页/事件、历史资源归属过滤、Helm 阶段与输出过滤、跨 Namespace/Secret/GVK/参数注入拒绝、全局写总开关、权限占位可替换且拒绝发生在副作用前、旧 REST 方法共用占位、CLI 失败/取消、配置环境变量、MCP 关闭、请求 ID 与跨站保护、相对 kubeconfig 引用。
 
 ```bash
 gofmt -w cmd internal tests

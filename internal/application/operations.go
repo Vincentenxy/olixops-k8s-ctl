@@ -14,6 +14,13 @@ import (
 	clusterk8s "olixops-k8s-ctl/internal/infrastructure/kubernetes"
 )
 
+type NamespaceMetadataChanges struct {
+	Labels            map[string]string `json:"labels,omitempty"`
+	Annotations       map[string]string `json:"annotations,omitempty"`
+	RemoveLabels      []string          `json:"removeLabels,omitempty"`
+	RemoveAnnotations []string          `json:"removeAnnotations,omitempty"`
+}
+
 func (s *ClusterService) resourceTarget(namespace, kind, name string) (domain.Target, error) {
 	target := domain.Target{Namespace: namespace, Kind: kind, Name: name}
 	if err := s.requireNamespace(namespace); err != nil {
@@ -223,6 +230,60 @@ func (s *ClusterService) DeleteNamespace(ctx context.Context, name string) (clus
 		return clusterk8s.MutationResult{}, err
 	}
 	return s.client.DeleteNamespace(ctx, name)
+}
+
+func (s *ClusterService) UpdateNamespaceMetadata(ctx context.Context, name string, changes NamespaceMetadataChanges) (clusterk8s.MutationResult, error) {
+	result := clusterk8s.MutationResult{Kind: "Namespace", Name: name}
+	if err := s.requireNamespace(name); err != nil {
+		return result, err
+	}
+	if len(changes.Labels) == 0 && len(changes.Annotations) == 0 && len(changes.RemoveLabels) == 0 && len(changes.RemoveAnnotations) == 0 {
+		return result, fmt.Errorf("at least one label or annotation change is required")
+	}
+	if err := validateNamespaceMetadata(changes); err != nil {
+		return result, err
+	}
+	target := domain.Target{Kind: "Namespace", Namespace: name, Name: name}
+	if err := s.authorize(ctx, "namespace.update", true, []domain.Target{target}, changes); err != nil {
+		return result, err
+	}
+	return s.client.UpdateNamespaceMetadata(ctx, name, changes.Labels, changes.Annotations, changes.RemoveLabels, changes.RemoveAnnotations)
+}
+
+func validateNamespaceMetadata(changes NamespaceMetadataChanges) error {
+	for key, value := range changes.Labels {
+		if len(validation.IsQualifiedName(key)) > 0 {
+			return fmt.Errorf("invalid Namespace label key")
+		}
+		if len(validation.IsValidLabelValue(value)) > 0 {
+			return fmt.Errorf("invalid Namespace label value")
+		}
+	}
+	for key, value := range changes.Annotations {
+		if len(validation.IsQualifiedName(key)) > 0 {
+			return fmt.Errorf("invalid Namespace annotation key")
+		}
+		if len(value) > 256*1024 {
+			return fmt.Errorf("Namespace annotation value is too large")
+		}
+	}
+	for _, key := range changes.RemoveLabels {
+		if len(validation.IsQualifiedName(key)) > 0 {
+			return fmt.Errorf("invalid Namespace label key")
+		}
+		if _, ok := changes.Labels[key]; ok {
+			return fmt.Errorf("label cannot be set and removed in the same request")
+		}
+	}
+	for _, key := range changes.RemoveAnnotations {
+		if len(validation.IsQualifiedName(key)) > 0 {
+			return fmt.Errorf("invalid Namespace annotation key")
+		}
+		if _, ok := changes.Annotations[key]; ok {
+			return fmt.Errorf("annotation cannot be set and removed in the same request")
+		}
+	}
+	return nil
 }
 
 type HelmUpgradeInput = execctl.HelmUpgradeOptions

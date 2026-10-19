@@ -119,6 +119,7 @@ REST 遵循项目约定：查询使用 GET，带参数操作使用 POST，不使
 | GET | `/api/v1/cluster/storage-classes` | StorageClass 摘要 | Control API key |
 | GET | `/api/v1/cluster/namespaces/{namespace}/resources` | Deployment、StatefulSet、Pod、Service、PVC 摘要 | Control API key + Namespace 范围 |
 | GET | `/api/v1/cluster/namespaces/{namespace}/gateway-resources` | Gateway API 资源摘要 | Control API key + Namespace 范围 |
+| POST | `/api/v1/cluster/namespaces/{namespace}/metadata` | 更新 Namespace 的 labels 和 annotations | Control API key + 写开关 + Namespace 范围 |
 | POST | `/api/v1/cluster/kubectl/apply` | 校验并执行 kubectl apply，可 server-side dry-run | Control API key + 写开关 |
 | POST | `/api/v1/cluster/helm/upgrade` | Helm upgrade/install，带 chart 预检查 | Control API key + 写开关 |
 
@@ -143,13 +144,13 @@ http://127.0.0.1:8091/api/v1/pub/mcp
 - `list_helm_releases`、`get_helm_status`、`get_helm_history`
 - `validate_manifest`
 
-启用后增加 12 个写工具：
+启用后增加 13 个写工具：
 
 - `dry_run_manifest`、`apply_manifest`
 - `helm_upgrade`、`helm_rollback`、`helm_uninstall`
 - `scale_workload`、`restart_workload`、`rollback_workload`
 - `delete_resource`
-- `create_namespace`、`delete_namespace`
+- `create_namespace`、`delete_namespace`、`update_namespace_metadata`
 - `update_configmap`
 
 MCP 写工具要同时满足 `MCP_WRITE_ENABLED=true` 和 `KUBERNETES_WRITE_ENABLED=true`。工具开关、固定资源白名单、Namespace 范围和参数校验属于功能边界，不等于调用者授权。当前 `Authorizer` 默认允许调用，写工具只能用于受控测试环境。日志、事件、资源 status 和 Pod 日志可能含有业务敏感信息。
@@ -168,7 +169,7 @@ YAML apply、资源详情/列表/删除共享 [internal/domain/resources.go](int
 - `policy/v1`：PodDisruptionBudget
 - Gateway API：Gateway、HTTPRoute、TCPRoute 的受控版本
 
-Secret、RBAC、CRD、任意集群级资源、节点操作、Pod exec、kubeconfig 导出和任意 shell 命令均未开放。Namespace 只能通过专用工具管理；`default` 和 `kube-*` 禁止删除。删除是单资源操作并使用 UID precondition；Namespace 删除是显式的大范围动作。扩缩容仅支持 Deployment/StatefulSet，重启和回滚支持 Deployment/StatefulSet/DaemonSet。
+Secret、RBAC、CRD、任意集群级资源、节点操作、Pod exec、kubeconfig 导出和任意 shell 命令均未开放。Namespace 只能通过专用工具管理；`default` 和 `kube-*` 禁止删除。Namespace 元数据更新只允许 labels 和 annotations，并通过显式删除键操作移除元数据。删除是单资源操作并使用 UID precondition；Namespace 删除是显式的大范围动作。扩缩容仅支持 Deployment/StatefulSet，重启和回滚支持 Deployment/StatefulSet/DaemonSet。
 
 Helm 只接受受控的 `repo/chart` 或 `oci://...` 形式，先下载并渲染，再检查存量和目标 manifest，禁用 hooks，不自动创建 Namespace；不保证兼容包含 Secret、RBAC、ServiceAccount 或其他未开放资源的 chart。预渲染不是安全沙箱，也不能保证变更事务性。
 
@@ -229,7 +230,7 @@ git diff --check
 
 ## 文档索引
 
-- [MCP 开发文档](docs/mcp-development.md)：27 个工具的参数、行为、限制、调用样例和测试覆盖。
+- [MCP 开发文档](docs/mcp-development.md)：28 个工具的参数、行为、限制、调用样例和测试覆盖。
 - [MCP / REST 权限控制设计](docs/mcp-authorization-design.md)：认证、授权、审批、审计和 Kubernetes RBAC 的后续方案。
 - [配置文件](configs/config.yaml)：本地默认配置。
 - [MCP 集成测试](tests/mcp_test.go)：MCP 协议和工具发现测试。

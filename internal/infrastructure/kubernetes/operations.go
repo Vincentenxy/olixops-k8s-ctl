@@ -228,6 +228,38 @@ func (c *Client) DeleteNamespace(ctx context.Context, name string) (MutationResu
 	return result, err
 }
 
+func (c *Client) UpdateNamespaceMetadata(ctx context.Context, name string, labels, annotations map[string]string, removeLabels, removeAnnotations []string) (MutationResult, error) {
+	result := MutationResult{Kind: "Namespace", Name: name}
+	patchMetadata := make(map[string]any)
+	if len(labels) > 0 || len(removeLabels) > 0 {
+		patchLabels := make(map[string]any, len(labels)+len(removeLabels))
+		for key, value := range labels {
+			patchLabels[key] = value
+		}
+		for _, key := range removeLabels {
+			patchLabels[key] = nil
+		}
+		patchMetadata["labels"] = patchLabels
+	}
+	if len(annotations) > 0 || len(removeAnnotations) > 0 {
+		patchAnnotations := make(map[string]any, len(annotations)+len(removeAnnotations))
+		for key, value := range annotations {
+			patchAnnotations[key] = value
+		}
+		for _, key := range removeAnnotations {
+			patchAnnotations[key] = nil
+		}
+		patchMetadata["annotations"] = patchAnnotations
+	}
+	patch, err := json.Marshal(map[string]any{"metadata": patchMetadata})
+	if err != nil {
+		return result, err
+	}
+	_, err = c.core.CoreV1().Namespaces().Patch(ctx, name, types.MergePatchType, patch, metav1.PatchOptions{})
+	result.Accepted = err == nil
+	return result, err
+}
+
 type LogOptions struct {
 	Namespace    string `json:"namespace"`
 	Pod          string `json:"pod"`

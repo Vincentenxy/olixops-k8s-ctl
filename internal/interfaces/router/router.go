@@ -54,6 +54,7 @@ func registerClusterRoutes(v1 *gin.RouterGroup, cfg *config.Config, clusterHandl
 	namespace := namespaces.Group("/:namespace")
 	namespace.GET("/resources", clusterHandler.Resources)
 	namespace.GET("/gateway-resources", clusterHandler.GatewayResources)
+	namespace.POST("/metadata", clusterHandler.UpdateNamespaceMetadata)
 
 	storageClasses := cluster.Group("/storage-classes")
 	storageClasses.GET("", clusterHandler.StorageClasses)

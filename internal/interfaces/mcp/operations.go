@@ -120,6 +120,13 @@ type configMapInput struct {
 	Name      string            `json:"name"`
 	Data      map[string]string `json:"data" jsonschema:"Merge these keys into an existing ConfigMap, without deleting other keys"`
 }
+type namespaceMetadataInput struct {
+	Namespace         string            `json:"namespace" jsonschema:"Namespace within the configured allowlist"`
+	Labels            map[string]string `json:"labels,omitempty" jsonschema:"Labels to set or replace"`
+	Annotations       map[string]string `json:"annotations,omitempty" jsonschema:"Annotations to set or replace"`
+	RemoveLabels      []string          `json:"removeLabels,omitempty" jsonschema:"Label keys to remove"`
+	RemoveAnnotations []string          `json:"removeAnnotations,omitempty" jsonschema:"Annotation keys to remove"`
+}
 
 func registerWrites(server *mcp.Server, service Service, timeout time.Duration) {
 	for _, dryRun := range []bool{true, false} {
@@ -158,6 +165,14 @@ func registerWrites(server *mcp.Server, service Service, timeout time.Duration) 
 	})
 	registerTool(server, "delete_namespace", "Delete a namespace and its contents; default and kube-* namespaces are protected", false, true, timeout, func(ctx context.Context, in namespaceInput) (clusterk8s.MutationResult, error) {
 		return service.DeleteNamespace(ctx, in.Namespace)
+	})
+	registerTool(server, "update_namespace_metadata", "Update only a Namespace's labels and annotations; other Namespace fields cannot be changed", false, true, timeout, func(ctx context.Context, in namespaceMetadataInput) (clusterk8s.MutationResult, error) {
+		return service.UpdateNamespaceMetadata(ctx, in.Namespace, application.NamespaceMetadataChanges{
+			Labels:            in.Labels,
+			Annotations:       in.Annotations,
+			RemoveLabels:      in.RemoveLabels,
+			RemoveAnnotations: in.RemoveAnnotations,
+		})
 	})
 	registerTool(server, "update_configmap", "Merge data keys into an existing ConfigMap; does not restart workloads or return data", false, true, timeout, func(ctx context.Context, in configMapInput) (clusterk8s.MutationResult, error) {
 		return service.UpdateConfigMap(ctx, in.Namespace, in.Name, in.Data)
