@@ -278,7 +278,7 @@ func TestMCPOperationsEndToEnd(t *testing.T) {
 	session := f.session(t)
 	tools, err := session.ListTools(context.Background(), nil)
 	require.NoError(t, err)
-	require.Len(t, tools.Tools, 28)
+	require.Len(t, tools.Tools, 29)
 	writes := map[string]bool{"dry_run_manifest": true, "apply_manifest": true, "helm_upgrade": true, "scale_workload": true, "restart_workload": true, "rollback_workload": true, "delete_resource": true, "helm_rollback": true, "helm_uninstall": true, "create_namespace": true, "delete_namespace": true, "update_namespace_metadata": true, "update_configmap": true}
 	for _, tool := range tools.Tools {
 		require.Equal(t, !writes[tool.Name], tool.Annotations.ReadOnlyHint, tool.Name)
@@ -292,6 +292,13 @@ func TestMCPOperationsEndToEnd(t *testing.T) {
 	require.NotContains(t, detail, "sensitive-env")
 	require.NotContains(t, detail, "sensitive-command")
 	require.NotContains(t, detail, "sensitive-args")
+	yamlView := call("get_resource_yaml", map[string]any{"namespace": "demo", "kind": "Pod", "name": "web-0"})
+	require.Contains(t, yamlView, "apiVersion: v1")
+	require.Contains(t, yamlView, "kind: Pod")
+	require.NotContains(t, yamlView, "sensitive-env")
+	require.NotContains(t, yamlView, "sensitive-command")
+	namespaceYAML := call("get_resource_yaml", map[string]any{"kind": "Namespace", "name": "demo"})
+	require.Contains(t, namespaceYAML, "kind: Namespace")
 	detail = call("get_resource", map[string]any{"namespace": "demo", "kind": "ConfigMap", "name": "web"})
 	require.Contains(t, detail, "dataKeys")
 	require.NotContains(t, detail, "sensitive-config-data")
@@ -445,7 +452,7 @@ func TestMCPOperationsEndToEnd(t *testing.T) {
 			require.NotEmpty(t, request.Targets)
 		}
 	}
-	for _, action := range []string{"workload.history", "resource.get", "resource.list", "event.list", "pod.logs", "helm.list", "helm.status", "helm.history", "manifest.preview", "manifest.apply", "helm.upgrade", "workload.scale", "workload.restart", "workload.rollback", "resource.delete", "helm.rollback", "helm.uninstall", "namespace.create", "namespace.delete", "namespace.update", "configmap.update"} {
+	for _, action := range []string{"workload.history", "resource.get", "resource.yaml.get", "namespace.yaml.get", "resource.list", "event.list", "pod.logs", "helm.list", "helm.status", "helm.history", "manifest.preview", "manifest.apply", "helm.upgrade", "workload.scale", "workload.restart", "workload.rollback", "resource.delete", "helm.rollback", "helm.uninstall", "namespace.create", "namespace.delete", "namespace.update", "configmap.update"} {
 		require.True(t, actions[action], action)
 	}
 }
@@ -511,6 +518,8 @@ func TestOperationGuardsAndReservedAuthorization(t *testing.T) {
 		{"get_pod_logs", map[string]any{"namespace": "demo", "pod": "web-0", "tailLines": -1}},
 		{"get_pod_logs", map[string]any{"namespace": "demo", "pod": "web-0", "container": "--follow"}},
 		{"get_resource", map[string]any{"namespace": "demo", "kind": "Secret", "name": "x"}},
+		{"get_resource_yaml", map[string]any{"namespace": "demo", "kind": "Secret", "name": "x"}},
+		{"get_resource_yaml", map[string]any{"namespace": "demo", "kind": "Namespace", "name": "demo"}},
 		{"list_events", map[string]any{"namespace": "private"}},
 		{"helm_upgrade", map[string]any{"namespace": "demo", "release": "web", "chart": "/etc/passwd"}},
 		{"helm_upgrade", map[string]any{"namespace": "demo", "release": "web", "chart": "--post-renderer"}},

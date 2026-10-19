@@ -49,6 +49,8 @@ func TestMCPReadOnlyHTTP(t *testing.T) {
 			fmt.Fprint(w, `{"apiVersion":"v1","kind":"NamespaceList","items":[{"metadata":{"name":"demo"},"status":{"phase":"Active"}},{"metadata":{"name":"private"}}]}`)
 		case "/apis/storage.k8s.io/v1/storageclasses":
 			fmt.Fprint(w, `{"apiVersion":"storage.k8s.io/v1","kind":"StorageClassList","items":[{"metadata":{"name":"standard"},"provisioner":"test"}]}`)
+		case "/apis/apps/v1":
+			fmt.Fprint(w, `{"apiVersion":"v1","groupVersion":"apps/v1","resources":[{"name":"deployments","kind":"Deployment","namespaced":true},{"name":"statefulsets","kind":"StatefulSet","namespaced":true}]}`)
 		case "/apis/apps/v1/namespaces/demo/deployments/nginx-demo":
 			fmt.Fprint(w, `{"apiVersion":"apps/v1","kind":"Deployment","metadata":{"name":"nginx-demo","generation":2},"spec":{"replicas":1},"status":{"observedGeneration":2,"replicas":1,"readyReplicas":1,"updatedReplicas":1,"availableReplicas":1}}`)
 		case "/apis/apps/v1/namespaces/demo/deployments/broken":
@@ -108,8 +110,8 @@ users:
 	defer session.Close()
 	tools, err := session.ListTools(ctx, nil)
 	require.NoError(t, err)
-	require.Len(t, tools.Tools, 15)
-	expected := map[string]bool{"cluster_status": true, "list_namespaces": true, "list_storage_classes": true, "list_resources": true, "list_gateway_resources": true, "get_rollout_status": true, "validate_manifest": true, "get_resource": true, "list_resource_objects": true, "list_events": true, "get_pod_logs": true, "list_helm_releases": true, "get_helm_status": true, "get_helm_history": true, "get_workload_history": true}
+	require.Len(t, tools.Tools, 16)
+	expected := map[string]bool{"cluster_status": true, "list_namespaces": true, "list_storage_classes": true, "list_resources": true, "list_gateway_resources": true, "get_rollout_status": true, "validate_manifest": true, "get_resource": true, "get_resource_yaml": true, "list_resource_objects": true, "list_events": true, "get_pod_logs": true, "list_helm_releases": true, "get_helm_status": true, "get_helm_history": true, "get_workload_history": true}
 	for _, tool := range tools.Tools {
 		require.True(t, expected[tool.Name], tool.Name)
 		require.NotNil(t, tool.Annotations)
@@ -128,6 +130,10 @@ users:
 	require.NotContains(t, call("list_namespaces", map[string]any{}, false), "private")
 	require.Contains(t, call("list_storage_classes", map[string]any{}, false), "standard")
 	call("list_resources", map[string]any{"namespace": "demo"}, false)
+	yamlView := call("get_resource_yaml", map[string]any{"namespace": "demo", "kind": "Deployment", "name": "nginx-demo"}, false)
+	require.Contains(t, yamlView, "apiVersion: apps/v1")
+	require.Contains(t, yamlView, "kind: Deployment")
+	call("get_resource_yaml", map[string]any{"namespace": "demo", "kind": "Secret", "name": "credentials"}, true)
 	gateway := call("list_gateway_resources", map[string]any{"namespace": "demo"}, false)
 	require.Contains(t, gateway, "HTTPRoute")
 	require.Contains(t, gateway, `"missingResources":["TCPRoute"]`)

@@ -135,10 +135,10 @@ http://127.0.0.1:8091/api/v1/pub/mcp
 
 采用官方 Go SDK 的 stateless Streamable HTTP 和 JSON-RPC。MCP 不使用 REST 的 `code/msg/data` 包装；工具失败通过 MCP 的错误结果返回。请求体上限 4 MiB，读工具默认 30 秒超时，写工具使用 `kubernetes.command-timeout-seconds`。
 
-默认注册 15 个只读工具：
+默认注册 16 个只读工具：
 
 - `cluster_status`、`list_namespaces`、`list_storage_classes`
-- `list_resources`、`list_gateway_resources`、`get_resource`、`list_resource_objects`
+- `list_resources`、`list_gateway_resources`、`get_resource`、`get_resource_yaml`、`list_resource_objects`
 - `list_events`、`get_pod_logs`
 - `get_rollout_status`、`get_workload_history`
 - `list_helm_releases`、`get_helm_status`、`get_helm_history`
@@ -230,7 +230,7 @@ git diff --check
 
 ## 文档索引
 
-- [MCP 开发文档](docs/mcp-development.md)：28 个工具的参数、行为、限制、调用样例和测试覆盖。
+- [MCP 开发文档](docs/mcp-development.md)：29 个工具的参数、行为、限制、调用样例和测试覆盖。
 - [MCP / REST 权限控制设计](docs/mcp-authorization-design.md)：认证、授权、审批、审计和 Kubernetes RBAC 的后续方案。
 - [配置文件](configs/config.yaml)：本地默认配置。
 - [MCP 集成测试](tests/mcp_test.go)：MCP 协议和工具发现测试。

@@ -15,9 +15,11 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/dynamic"
+	"sigs.k8s.io/yaml"
 
 	"olixops-k8s-ctl/internal/domain"
 )
@@ -37,6 +39,13 @@ type ResourceDetail struct {
 type ResourcePage struct {
 	Items    []ResourceDetail `json:"items"`
 	Continue string           `json:"continue,omitempty"`
+}
+type ResourceYAML struct {
+	Kind      string `json:"kind"`
+	Namespace string `json:"namespace,omitempty"`
+	Name      string `json:"name"`
+	YAML      string `json:"yaml"`
+	Redacted  bool   `json:"redacted"`
 }
 type MutationResult struct {
 	Kind      string `json:"kind"`
@@ -83,6 +92,45 @@ func (c *Client) GetResource(ctx context.Context, namespace, kind, name string) 
 		return ResourceDetail{}, err
 	}
 	return resourceDetail(item), nil
+}
+
+func (c *Client) GetResourceYAML(ctx context.Context, namespace, kind, name string) (ResourceYAML, error) {
+	var object map[string]any
+	if kind == "Namespace" {
+		item, err := c.core.CoreV1().Namespaces().Get(ctx, name, metav1.GetOptions{})
+		if err != nil {
+			return ResourceYAML{}, err
+		}
+		object, err = runtime.DefaultUnstructuredConverter.ToUnstructured(item)
+		if err != nil {
+			return ResourceYAML{}, err
+		}
+		// TypeMeta is commonly omitted from typed client responses, but it is
+		// required for a useful standalone YAML manifest.
+		object["apiVersion"] = "v1"
+		object["kind"] = "Namespace"
+	} else {
+		resource, err := c.resource(ctx, kind, namespace)
+		if err != nil {
+			return ResourceYAML{}, err
+		}
+		item, err := resource.Get(ctx, name, metav1.GetOptions{})
+		if err != nil {
+			return ResourceYAML{}, err
+		}
+		object = item.Object
+	}
+
+	// Return a readable manifest while applying the same data minimization used by
+	// structured resource reads. Secret resources are rejected by the application
+	// layer and are never serialized by this generic endpoint.
+	scrub(object)
+	data, err := yaml.Marshal(object)
+	if err != nil {
+		return ResourceYAML{}, err
+	}
+	item := unstructured.Unstructured{Object: object}
+	return ResourceYAML{Kind: item.GetKind(), Namespace: item.GetNamespace(), Name: item.GetName(), YAML: string(data), Redacted: true}, nil
 }
 
 func (c *Client) ListResourceObjects(ctx context.Context, namespace, kind, selector, token string, limit int64) (ResourcePage, error) {

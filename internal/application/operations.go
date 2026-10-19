@@ -55,6 +55,36 @@ func (s *ClusterService) GetResource(ctx context.Context, namespace, kind, name 
 	}
 	return s.client.GetResource(ctx, namespace, kind, name)
 }
+
+func (s *ClusterService) GetResourceYAML(ctx context.Context, namespace, kind, name string) (clusterk8s.ResourceYAML, error) {
+	if kind == "Secret" {
+		return clusterk8s.ResourceYAML{}, fmt.Errorf("Secret YAML is not available")
+	}
+	var target domain.Target
+	var err error
+	if kind == "Namespace" {
+		if namespace != "" {
+			return clusterk8s.ResourceYAML{}, fmt.Errorf("Namespace is cluster-scoped and does not accept a namespace")
+		}
+		if err := s.requireNamespace(name); err != nil {
+			return clusterk8s.ResourceYAML{}, err
+		}
+		target = domain.Target{Kind: kind, Namespace: name, Name: name}
+		if len(validation.IsDNS1123Label(name)) > 0 {
+			return clusterk8s.ResourceYAML{}, fmt.Errorf("invalid resource name")
+		}
+		err = s.authorize(ctx, "namespace.yaml.get", false, []domain.Target{target}, nil)
+	} else {
+		target, err = s.namedTarget(namespace, kind, name)
+		if err == nil {
+			err = s.authorize(ctx, "resource.yaml.get", false, []domain.Target{target}, nil)
+		}
+	}
+	if err != nil {
+		return clusterk8s.ResourceYAML{}, err
+	}
+	return s.client.GetResourceYAML(ctx, namespace, kind, name)
+}
 func pageLimit(limit int64) (int64, error) {
 	if limit == 0 {
 		return 100, nil

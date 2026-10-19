@@ -31,6 +31,7 @@ type Service interface {
 	ReadService
 	GetWorkloadHistory(context.Context, string, string, string, string, int64) (clusterk8s.WorkloadHistory, error)
 	GetResource(context.Context, string, string, string) (clusterk8s.ResourceDetail, error)
+	GetResourceYAML(context.Context, string, string, string) (clusterk8s.ResourceYAML, error)
 	ListResourceObjects(context.Context, string, string, string, string, int64) (clusterk8s.ResourcePage, error)
 	ListEvents(context.Context, string, string, string, string, int64) (clusterk8s.EventPage, error)
 	GetPodLogs(context.Context, clusterk8s.LogOptions) (clusterk8s.PodLogs, error)
