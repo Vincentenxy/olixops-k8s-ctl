@@ -106,7 +106,7 @@ npx @modelcontextprotocol/inspector
 | `list_resources` | `namespace` | 原有 Deployment、StatefulSet、Pod、Service、PVC 摘要 |
 | `list_gateway_resources` | `namespace` | GatewayClass、Gateway、HTTPRoute、TCPRoute 摘要；缺失资源记录到 missingResources |
 | `get_resource` | `namespace, kind, name` | 白名单资源的 spec/status 与基本身份信息；过滤注解、ConfigMap 数据、env.value、command/args 等 |
-| `get_resource_yaml` | `namespace?, kind, name` | 返回白名单资源的可读脱敏 YAML；Namespace 可省略 namespace；Secret 永不返回 |
+| `get_resource_yaml` | `namespace?, kind, name` | 返回白名单资源的原始可读 YAML；Namespace 可省略 namespace；权限和字段过滤策略预留 |
 | `list_resource_objects` | `namespace, kind, labelSelector?, limit?, continue?` | 白名单内任意一种资源的分页详情，过滤规则同 get_resource；可查 Job、CronJob 等 |
 | `list_events` | `namespace, kind?, name?, limit?, continue?` | Namespace 事件，支持指定对象过滤 |
 | `get_pod_logs` | `namespace, pod, container?, tailLines?, sinceSeconds?, previous?, timestamps?` | 非流式日志，支持上一实例和时间范围 |
@@ -168,7 +168,7 @@ YAML apply、通用详情/列表/删除共享 `internal/domain/resources.go` 的
 | gateway.networking.k8s.io/v1 或 v1beta1 | Gateway、HTTPRoute |
 | gateway.networking.k8s.io/v1alpha2 或 v1 | TCPRoute，具体取决于集群实际服务版本 |
 
-Namespace 只通过专用工具管理。Namespace 元数据工具只处理 `metadata.labels` 和 `metadata.annotations`，不接受 `spec`、`status`、`finalizers`、名称或 Namespace 迁移等字段。`get_resource_yaml` 只读、只接受固定资源类型，并删除 annotations、managedFields、ConfigMap/Pod 数据字段和命令/环境变量字面量；Secret YAML 直接拒绝。Secret、RBAC、CRD、任意集群级资源不在通用白名单；不提供任意 shell/kubectl/Helm 参数、Pod exec、kubeconfig 导出或节点管理。名称不接受路径、标志位等注入内容。
+Namespace 只通过专用工具管理。Namespace 元数据工具只处理 `metadata.labels` 和 `metadata.annotations`，不接受 `spec`、`status`、`finalizers`、名称或 Namespace 迁移等字段。`get_resource_yaml` 只读、只接受固定资源类型，当前返回资源原始 YAML；权限校验和字段过滤策略预留在 application 授权层，后续统一接入。Secret、RBAC、CRD、任意集群级资源不在通用白名单；不提供任意 shell/kubectl/Helm 参数、Pod exec、kubeconfig 导出或节点管理。名称不接受路径、标志位等注入内容。
 
 ## Helm 执行细节与限制
 
@@ -235,7 +235,7 @@ curl -sS http://127.0.0.1:8091/api/v1/pub/mcp \
 
 测试使用真实 SDK 客户端，经 Gin → MCP → application → 模拟 Kubernetes HTTP。外部命令使用测试程序自身作为独立子进程，验证 argv、stdin、临时文件权限与清理，不执行真实 kubectl/Helm 或连接用户集群。
 
-覆盖：默认 16 个读工具、启用后 29 个工具、读写标注、各功能调用、脱敏 YAML 读取、Namespace 元数据 patch、缩容到 0、scale 乐观锁、删除 UID precondition、扩容/重启/回滚参数、日志参数及 256 KiB 上限、分页/事件、历史资源归属过滤、Helm 阶段与输出过滤、跨 Namespace/Secret/GVK/参数注入拒绝、全局写总开关、权限占位可替换且拒绝发生在副作用前、旧 REST 方法共用占位、CLI 失败/取消、配置环境变量、MCP 关闭、请求 ID 与跨站保护、相对 kubeconfig 引用。
+覆盖：默认 16 个读工具、启用后 29 个工具、读写标注、各功能调用、原始 YAML 读取、Namespace 元数据 patch、缩容到 0、scale 乐观锁、删除 UID precondition、扩容/重启/回滚参数、日志参数及 256 KiB 上限、分页/事件、历史资源归属过滤、Helm 阶段与输出过滤、跨 Namespace/Secret/GVK/参数注入拒绝、全局写总开关、权限占位可替换且拒绝发生在副作用前、旧 REST 方法共用占位、CLI 失败/取消、配置环境变量、MCP 关闭、请求 ID 与跨站保护、相对 kubeconfig 引用。
 
 ```bash
 gofmt -w cmd internal tests

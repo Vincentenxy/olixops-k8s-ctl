@@ -65,7 +65,7 @@ func registerReads(server *mcp.Server, service Service) {
 	register(server, "get_resource", "Get a resource with annotations, ConfigMap values and literal environment/command values omitted or redacted", func(ctx context.Context, in resourceInput) (clusterk8s.ResourceDetail, error) {
 		return service.GetResource(ctx, in.Namespace, in.Kind, in.Name)
 	})
-	register(server, "get_resource_yaml", "Get a readable, sanitized YAML view of an allowlisted resource; Secret YAML is never returned", func(ctx context.Context, in resourceYAMLInput) (clusterk8s.ResourceYAML, error) {
+	register(server, "get_resource_yaml", "Get the raw YAML of an allowlisted resource; policy and field redaction are reserved for a later authorization layer", func(ctx context.Context, in resourceYAMLInput) (clusterk8s.ResourceYAML, error) {
 		return service.GetResourceYAML(ctx, in.Namespace, in.Kind, in.Name)
 	})
 	register(server, "list_resource_objects", "List allowlisted resource details, filtered by labels and paginated", func(ctx context.Context, in listInput) (clusterk8s.ResourcePage, error) {

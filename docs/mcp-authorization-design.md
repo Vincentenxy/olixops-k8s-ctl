@@ -90,8 +90,8 @@ Authorizer：身份、角色、作用域、内容策略、必要审批
 | namespace.create | 新 Namespace 及后续归属信息 |
 | namespace.update | 仅 Namespace labels/annotations 的设置与显式删除键，不允许修改其他 metadata/spec/status 字段 |
 | namespace.delete | 整个 Namespace 与全部子资源的删除权，不可沿用单资源删除权 |
-| resource.yaml.get | 固定 namespaced 资源的脱敏 YAML 读取；不包含 Secret |
-| namespace.yaml.get | Namespace 的脱敏 YAML 读取；按 Namespace 作用域限制 |
+| resource.yaml.get | 固定 namespaced 资源的原始 YAML 读取；字段过滤策略预留在授权层 |
+| namespace.yaml.get | Namespace 的原始 YAML 读取；按 Namespace 作用域限制 |
 
 YAML apply 可以绕过独立工具完成扩缩容、重启和配置更新。需要二选一并明确：把 manifest.apply 定义成范围内完整配置修改权，或者对 diff 做字段级授权，再分别检查 workload.scale/configmap.update 等动作；不能假设只限制 scale 工具就能禁止通过 YAML 缩容。
 

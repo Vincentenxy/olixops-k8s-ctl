@@ -45,7 +45,9 @@ type ResourceYAML struct {
 	Namespace string `json:"namespace,omitempty"`
 	Name      string `json:"name"`
 	YAML      string `json:"yaml"`
-	Redacted  bool   `json:"redacted"`
+	// Redacted is reserved for a future policy layer. Raw YAML currently has
+	// Redacted=false and is returned only for the fixed resource allowlist.
+	Redacted bool `json:"redacted"`
 }
 type MutationResult struct {
 	Kind      string `json:"kind"`
@@ -121,16 +123,14 @@ func (c *Client) GetResourceYAML(ctx context.Context, namespace, kind, name stri
 		object = item.Object
 	}
 
-	// Return a readable manifest while applying the same data minimization used by
-	// structured resource reads. Secret resources are rejected by the application
-	// layer and are never serialized by this generic endpoint.
-	scrub(object)
+	// Keep this serialization path raw. Permission and field-redaction policy is
+	// intentionally reserved for the application authorization seam.
 	data, err := yaml.Marshal(object)
 	if err != nil {
 		return ResourceYAML{}, err
 	}
 	item := unstructured.Unstructured{Object: object}
-	return ResourceYAML{Kind: item.GetKind(), Namespace: item.GetNamespace(), Name: item.GetName(), YAML: string(data), Redacted: true}, nil
+	return ResourceYAML{Kind: item.GetKind(), Namespace: item.GetNamespace(), Name: item.GetName(), YAML: string(data)}, nil
 }
 
 func (c *Client) ListResourceObjects(ctx context.Context, namespace, kind, selector, token string, limit int64) (ResourcePage, error) {
