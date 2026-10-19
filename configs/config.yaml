@@ -26,4 +26,4 @@ control:
 # MCP write tools are opt-in. The future authorization hook currently allows all.
 mcp:
   enabled: true
-  write-enabled: false
+  write-enabled: true
