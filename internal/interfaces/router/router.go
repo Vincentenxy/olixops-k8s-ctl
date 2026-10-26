@@ -7,6 +7,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"olixops-k8s-ctl/internal/application"
+	catalogapp "olixops-k8s-ctl/internal/application/catalog"
 	"olixops-k8s-ctl/internal/infrastructure/config"
 	"olixops-k8s-ctl/internal/interfaces/handler"
 	mcpiface "olixops-k8s-ctl/internal/interfaces/mcp"
@@ -15,6 +16,14 @@ import (
 )
 
 func New(cfg *config.Config, services ...*application.ClusterService) (*gin.Engine, error) {
+	return newRouter(cfg, nil, services...)
+}
+
+func NewWithCatalog(cfg *config.Config, service *application.ClusterService, catalog *catalogapp.Service) (*gin.Engine, error) {
+	return newRouter(cfg, catalog, service)
+}
+
+func newRouter(cfg *config.Config, catalog *catalogapp.Service, services ...*application.ClusterService) (*gin.Engine, error) {
 	gin.SetMode(cfg.Server.Mode)
 	r := gin.New()
 	r.Use(middleware.RequestID(), middleware.GinLogger(), gin.Recovery())
@@ -27,16 +36,19 @@ func New(cfg *config.Config, services ...*application.ClusterService) (*gin.Engi
 	pub.GET("/ready", health.Ready)
 	if len(services) > 0 && services[0] != nil {
 		cluster := handler.NewClusterHandler(services[0])
-		registerMCP(pub, cfg, services[0])
+		registerMCP(pub, cfg, services[0], catalog)
 		registerClusterRoutes(v1, cfg, cluster)
 	}
 
+	if catalog != nil {
+		handler.RegisterCatalog(v1.Group("", middleware.ControlKey(cfg.Control.APIKey)), catalog)
+	}
 	return r, nil
 }
 
-func registerMCP(pub *gin.RouterGroup, cfg *config.Config, service *application.ClusterService) {
+func registerMCP(pub *gin.RouterGroup, cfg *config.Config, service *application.ClusterService, catalog *catalogapp.Service) {
 	if cfg.MCP.Enabled {
-		mcpHandler := mcpiface.NewHandler(service, cfg.App.Version, mcpiface.Options{WriteEnabled: cfg.MCP.WriteEnabled, WriteTimeout: time.Duration(cfg.Kubernetes.CommandTimeoutSecond) * time.Second})
+		mcpHandler := mcpiface.NewHandler(service, cfg.App.Version, mcpiface.Options{Catalog: catalog, WriteEnabled: cfg.MCP.WriteEnabled, WriteTimeout: time.Duration(cfg.Kubernetes.CommandTimeoutSecond) * time.Second})
 		pub.Any("/mcp", func(c *gin.Context) {
 			ctx := context.WithValue(c.Request.Context(), logger.TraceIDKey, c.GetString(string(logger.TraceIDKey)))
 			mcpHandler.ServeHTTP(c.Writer, c.Request.WithContext(ctx))

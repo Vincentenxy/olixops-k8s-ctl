@@ -14,6 +14,19 @@ type Config struct {
 	Kubernetes KubernetesConfig `mapstructure:"kubernetes"`
 	MCP        MCPConfig        `mapstructure:"mcp"`
 	Control    ControlConfig    `mapstructure:"control"`
+	Catalog    CatalogConfig    `mapstructure:"catalog"`
+}
+
+type CatalogConfig struct {
+	Enabled          bool   `mapstructure:"enabled"`
+	DatabasePath     string `mapstructure:"database-path"`
+	GatewayID        string `mapstructure:"gateway-id"`
+	Cluster          string `mapstructure:"cluster"`
+	GatewayNamespace string `mapstructure:"gateway-namespace"`
+	GatewayService   string `mapstructure:"gateway-service"`
+	GatewayName      string `mapstructure:"gateway-name"`
+	PortStart        int    `mapstructure:"port-start"`
+	PortEnd          int    `mapstructure:"port-end"`
 }
 
 type MCPConfig struct {
@@ -60,6 +73,15 @@ func Load(path string) (*Config, error) {
 	v.AddConfigPath(path)
 	v.SetEnvKeyReplacer(strings.NewReplacer(".", "_", "-", "_"))
 	v.AutomaticEnv()
+	v.SetDefault("catalog.enabled", false)
+	v.SetDefault("catalog.database-path", "./data/olixops.db")
+	v.SetDefault("catalog.gateway-id", "higress")
+	v.SetDefault("catalog.cluster", "configured")
+	v.SetDefault("catalog.gateway-namespace", "higress-system")
+	v.SetDefault("catalog.gateway-service", "higress-gateway")
+	v.SetDefault("catalog.gateway-name", "higress-tcp-gateway")
+	v.SetDefault("catalog.port-start", 30000)
+	v.SetDefault("catalog.port-end", 30200)
 
 	if err := v.ReadInConfig(); err != nil {
 		return nil, fmt.Errorf("read config file: %w", err)

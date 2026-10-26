@@ -125,3 +125,14 @@ Namespace 管理等集群级动作可以使用单独的管理身份，避免普�
 4. 明确 apply 的字段权限语义、Helm 来源/实际资源校验与 Namespace 删除管理权限。
 5. 接入集群侧最小权限身份、审计存储与需要的审批。
 6. 用 REST/MCP 两条链路验证：未登录不可写、越作用域拒绝、批量部分越权整体拒绝、直接调用/工具别名不能绕过、凭据撤销即时生效、审批内容替换被拒绝。
+
+
+## 标准服务目录的新增预留点（2026-10-26）
+
+`application/catalog.New(..., authorizer)` 复用同一 domain.Authorizer，默认 DeferredAuthorizer。公开用例先执行 `catalog.Service.policy`，提供 cluster/action/write/payloadDigest；当前目录 ID 和 ownerId 在请求摘要内，Targets 尚不包含可被视为认证身份的 owner。后续策略适配器需解析可信 Principal，并按实例查库绑定 Namespace/归属，不允许信任调用参数 ownerId。部署桥接层继续对实际 Kubernetes Targets 调用原有 Authorizer。
+
+新增写动作：catalog.template.save、catalog.config.save、catalog.port.sync、catalog.port.reserve、catalog.port.release、catalog.deployment.prepare、catalog.deployment.execute、catalog.instance.delete。数据库写入同样需要未来授权，不能因为不改集群就按匿名读放行。Kubernetes 写开关只阻止集群变更，不阻止目录数据库保存；MCP 写开关控制全部写工具注册。
+
+读动作包含 catalog.template.list/get、config.preview、instance.list/get、revision.list、deployment.get/list、port.list/history、access.verify。原始配置/YAML 暂不脱敏；后续字段策略与权限适配在这里接入。access.verify 只使用已存实例明确引用的 Secret 执行固定 AUTH/PING 或 SELECT 1，不返回密码；其网络目标只来自已配置 LB 和已存部署端口。全 Namespace TCPRoute 列表是共享入口台账核对的明确需求，未来应单独授予该读动作。
+
+本次没有实施身份、策略、审批、自动脱敏或新增 RBAC 绑定，端口事件是业务历史，不能当作完整安全审计。

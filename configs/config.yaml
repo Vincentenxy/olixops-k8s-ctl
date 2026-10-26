@@ -27,3 +27,14 @@ control:
 mcp:
   enabled: true
   write-enabled: true
+# Embedded SQLite: use a persistent, writable directory. No separate DB server.
+catalog:
+  enabled: true
+  database-path: ./data/olixops.db
+  cluster: configured
+  gateway-id: higress
+  gateway-namespace: higress-system
+  gateway-service: higress-gateway
+  gateway-name: higress-tcp-gateway
+  port-start: 30000
+  port-end: 30200

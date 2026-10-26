@@ -1,10 +1,12 @@
 # MCP 开发方案与实现记录
 
-更新时间：2026-10-18。
+更新时间：2026-10-26。
 
 ## 当前结果
 
-已接入官方 Go SDK v1.8.0 和 stateless Streamable HTTP。当前有 **16 个只读工具、13 个写工具，共 29 个工具**；默认只注册只读工具，写工具通过配置独立启用。
+已接入官方 Go SDK v1.8.0 和 stateless Streamable HTTP。原有 Kubernetes 能力为 **16 读 + 13 写 = 29**。开启 `catalog.enabled` 后增加 **11 读 + 8 写 = 19**，合计 **27 读 + 21 写 = 48**。仓库当前本地配置已开启目录及 MCP 写工具；设置 `MCP_WRITE_ENABLED=false` 只注册 27 个只读工具。
+
+新增工具、完整 HTTP 对照、参数、SQLite 持久化、Higress 领用和故障恢复见 [标准服务目录文档](standard-services.md)。
 
 本轮按用户要求先完成操作能力，**身份认证、角色、权限策略、审批和完整审计尚未实现**。业务层已预留可替换的 `domain.Authorizer`，默认 `DeferredAuthorizer` 明确放行。开关、参数校验、资源白名单和 Namespace 范围检查均不是用户权限系统。
 
@@ -19,6 +21,7 @@
 | 3 | 其余查询、日志、Helm 和常用写操作 | 已完成，见下方工具清单 |
 | 4 | REST/MCP 共用权限校验接口 | 已预留，默认放行；用拒绝适配器测试调用位置 |
 | 5 | 认证、策略、审批、完整审计、集群侧最小权限 RBAC | 尚未实现，单独评审 |
+| 6 | SQLite 标准模板、独立实例、修订、端口/部署/回收、访问验证 | 已实现；模拟集群测试通过，真实部署尚待环境联调 |
 
 ## 架构与入口
 
@@ -62,8 +65,8 @@ kubernetes:
 开关在启动时读取。环境变量示例：
 
 ```bash
-# 仅启动读取能力（默认）
-go run ./cmd
+# 仅注册读取工具
+MCP_WRITE_ENABLED=false go run ./cmd
 
 # 开放 MCP 写工具；同时需要 Kubernetes 写总开关
 MCP_WRITE_ENABLED=true KUBERNETES_WRITE_ENABLED=true go run ./cmd
@@ -74,13 +77,13 @@ MCP_ENABLED=false go run ./cmd
 
 | mcp.write-enabled | kubernetes.write-enabled | 行为 |
 | --- | --- | --- |
-| false | 任意 | 仅注册 16 个读工具，写工具不存在 |
-| true | false | 注册 29 个工具，但写调用被业务层拒绝 |
-| true | true | 29 个工具可调用，仍受固定集群、Namespace、资源与参数检查；权限占位当前放行 |
+| false | 任意 | 目录开启时 27 个读工具；关闭时 16 个；无写工具 |
+| true | false | 目录开启时注册 48 个；集群变更被拒绝，目录数据库写入仍可执行 |
+| true | true | 目录开启时 48 个工具；关闭时 29 个；范围/参数检查有效，权限占位放行 |
 
 `allowed-namespaces: []` 沿用原语义：允许所有 Namespace。生产权限阶段将另行设计用户的显式作用域，不能把这个空列表当作默认拒绝。
 
-运行主机需要安装 kubectl、Helm（当前命令适配面向 Helm 3），在服务 PATH 中可用或通过 `kubernetes.kubectl` / `kubernetes.helm` 指定。现有 Dockerfile 的运行镜像没有安装这些 CLI，需要提供包含 CLI 的运行镜像或挂载受信任的兼容二进制；只有 client-go 查询不依赖 CLI。
+运行主机需要安装 kubectl、Helm（当前命令适配面向 Helm 3），在服务 PATH 中可用或通过 `kubernetes.kubectl` / `kubernetes.helm` 指定。Dockerfile 已加入 kubectl/Helm 安装步骤和持久目录；只有 client-go 查询不依赖 CLI。镜像实际版本须在发布时验收。
 
 默认从 `kubeconfig.Provider` 读取当前用户 `~/.kube/config`。文件 Provider 解析相对 CA/证书/私钥/token 文件引用，临时复制后仍指向原文件。命令临时 kubeconfig 和 values 使用 0600，操作结束后删除；不输出凭据。
 
@@ -94,7 +97,7 @@ MCP_ENABLED=false go run ./cmd
 npx @modelcontextprotocol/inspector
 ```
 
-## 只读工具（16 个）
+## 原有 Kubernetes 只读工具（16 个）
 
 所有读取仍受固定集群和 Namespace 配置约束。StorageClass、GatewayClass 为明确开放的集群级摘要。受限 Namespace 配置下，集群状态只返回可见 Namespace 数量。
 
@@ -252,3 +255,14 @@ go vet ./...
 - [MCP 工具标注的限制](https://blog.modelcontextprotocol.io/posts/2026-03-16-tool-annotations/)
 - [Kubernetes rollout](https://kubernetes.io/docs/reference/kubectl/generated/kubectl_rollout/)
 - [Kubernetes logs](https://kubernetes.io/docs/reference/kubectl/generated/kubectl_logs/)
+
+
+## 标准服务新增工具（19 个）
+
+只读：`list_service_templates`、`get_service_template`、`preview_service_config`、`list_service_instances`、`get_service_instance`、`list_service_revisions`、`get_service_deployment`、`list_service_deployments`、`verify_service_access`、`list_gateway_ports`、`list_gateway_port_events`。
+
+写入：`save_service_template`、`save_service_config`、`sync_gateway_ports`、`reserve_gateway_port`、`release_gateway_port`、`prepare_service_deployment`、`deploy_service`、`delete_service_instance`。同步只改 SQLite，仍标注写；deploy/delete/release 标注 destructive。所有用例共用 application/catalog 权限预留点，默认放行，不新增权限策略或自动脱敏。
+
+[完整参数、调用链与失败恢复](standard-services.md)。GET 状态读取不更新数据库；verify 是明确的服务端经 LB 的非写入协议验证，不证明用户网络可达。原始渲染 YAML 按原文返回。业务错误通过 isError 文本带同一 reason；不要只检查 HTTP 200。
+
+新增测试见 `internal/application/catalog/service_test.go`、`internal/infrastructure/kubernetes/catalog_test.go`、`tests/catalog_interfaces_test.go`：SQLite 事务和重启、双连接抢端口、模板/配置不可变、幂等、端口冲突、部分部署重试、按 UID 删除、PVC 保留、共享入口增量更新、REST/MCP 共用记录与 27/48 工具发现。

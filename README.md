@@ -2,7 +2,7 @@
 
 `olixops-k8s-ctl` 是一个面向受控 Kubernetes 集群的控制服务。它把 Kubernetes 查询、清单校验、常用工作负载操作和 Helm 操作封装成 HTTP API 与 MCP 工具，服务默认监听本机回环地址，并通过固定的集群、Namespace、资源类型和参数边界降低误操作风险。
 
-当前版本已经完成 MCP 基础接入和常用读写操作，但**调用者身份认证、细粒度授权、审批和完整审计仍未实现**。MCP 写工具默认关闭；如果显式打开，当前预留的 `Authorizer` 默认放行，所以只能在受控的本机或隔离网络中测试。
+当前版本已经完成 MCP 基础接入和常用读写操作，但**调用者身份认证、细粒度授权、审批和完整审计仍未实现**。仓库当前本地配置已开启 MCP 写工具；设置 `MCP_WRITE_ENABLED=false` 可关闭。开启时，当前预留的 `Authorizer` 默认放行，所以只能在受控的本机或隔离网络中测试。
 
 ## 先看什么
 
@@ -17,9 +17,10 @@
 7. [internal/infrastructure/kubernetes](internal/infrastructure/kubernetes)：client-go 查询、动态资源、事件、日志、扩缩容和状态适配器。
 8. [internal/infrastructure/execctl](internal/infrastructure/execctl)：以参数数组调用 kubectl/Helm 的适配器。
 9. [internal/infrastructure/kubeconfig](internal/infrastructure/kubeconfig)：文件、数据库接口和 InCluster kubeconfig Provider。
-10. [tests](tests)：从 Gin/MCP 到模拟 Kubernetes API、命令子进程和权限拒绝适配器的契约测试。
+10. [internal/application/catalog](internal/application/catalog)、[internal/domain/catalog](internal/domain/catalog)、[internal/infrastructure/catalogdb](internal/infrastructure/catalogdb)：SQLite 标准模板、独立实例配置、不可变修订、Higress 端口与部署状态机。
+11. [tests](tests)：从 Gin/MCP 到模拟 Kubernetes API、命令子进程和权限拒绝适配器的契约测试。
 
-MCP 的完整参数、限制和调用示例见 [docs/mcp-development.md](docs/mcp-development.md)；权限控制的后续设计见 [docs/mcp-authorization-design.md](docs/mcp-authorization-design.md)。
+标准服务从配置保存到部署、回收的源码路径与完整参数见 [标准服务目录文档](docs/standard-services.md)。MCP 的完整参数、限制和调用示例见 [docs/mcp-development.md](docs/mcp-development.md)；权限控制的后续设计见 [docs/mcp-authorization-design.md](docs/mcp-authorization-design.md)。
 
 ## 架构
 
@@ -28,10 +29,18 @@ MCP 的完整参数、限制和调用示例见 [docs/mcp-development.md](docs/mc
 ```mermaid
 flowchart TD
     Client[REST Client / MCP Client] --> Router[Gin Router\nRequest ID / Logger / Recovery]
-    Router --> REST[REST Handler\n/api/v1/cluster]
+    Router --> REST[REST Handler\n/api/v1/cluster /templates /services /ports]
     Router --> MCP[MCP Streamable HTTP\n/api/v1/pub/mcp]
     REST --> App[application.ClusterService]
     MCP --> App
+    REST --> Catalog[application/catalog.Service]
+    MCP --> Catalog
+    Catalog --> SQLite[catalogdb SQLite
+模板/实例/修订/部署/端口/事件]
+    Catalog --> Bridge[CatalogCluster
+冻结产物/范围检查/入口增量维护]
+    Bridge --> App
+    Bridge --> K8s
     App --> Policy[domain.Authorizer\n当前 DeferredAuthorizer 放行]
     App --> K8s[client-go Adapter]
     App --> CLI[execctl Runner]
@@ -51,11 +60,12 @@ flowchart TD
 - REST 或 MCP 负责协议层解析；`ClusterService` 负责 Namespace、资源 GVK、名称、大小、超时和写开关检查。
 - 业务层在访问 Kubernetes 或启动 CLI 之前调用 `domain.Authorizer`。现在的实现是可替换的 `DeferredAuthorizer`，后续接入真实身份和策略时不需要把权限逻辑散落到 MCP handler。
 - client-go 用于查询和原生资源变更；kubectl/Helm 只通过参数数组执行，不经过 shell，不接受调用方自带 kubeconfig、连接地址或任意命令参数。
-- 返回前对资源详情、日志和命令输出做大小限制及字段过滤；错误对外使用通用信息，避免返回凭据、连接串、完整 YAML 或 CLI stderr。
+- 原始 YAML 读取与标准配置预览按原文返回；历史结构化资源接口沿用原有过滤。CLI stderr、连接串和凭据不写日志。目录业务错误返回可识别 reason，未分类依赖错误沿用通用提示。
+- 目录初始化只写本地 SQLite；端口分配前完整核对 Higress，部署绑定固定修订/YAML/摘要；中断保留预留记录。SQLite 单副本，配置保存不执行集群部署。
 
 ## 快速启动
 
-开发环境需要 Go 1.26、能够访问目标集群的 kubeconfig，以及执行写操作时可用的 `kubectl` 和 Helm 3。client-go 查询不依赖 kubectl/Helm；当前 Docker 运行镜像也没有内置这两个 CLI，因此容器写操作需要自定义运行镜像或挂载受信任的兼容二进制。
+开发环境需要 Go 1.26、能够访问目标集群的 kubeconfig，以及执行写操作时可用的 `kubectl` 和 Helm 3。client-go 查询不依赖 kubectl/Helm；Dockerfile 已加入这两个 CLI 的安装步骤，并为 SQLite 创建非 root 可写的 `/data`；完整容器构建还需基础镜像仓库网络可用。
 
 ```bash
 go run ./cmd
@@ -79,7 +89,16 @@ kubernetes:
   allowed-namespaces: []
 mcp:
   enabled: true
-  write-enabled: false
+  write-enabled: true
+catalog:
+  enabled: true
+  database-path: ./data/olixops.db
+  gateway-id: higress
+  gateway-namespace: higress-system
+  gateway-service: higress-gateway
+  gateway-name: higress-tcp-gateway
+  port-start: 30000
+  port-end: 30200
 ```
 
 常用环境变量会覆盖同名配置键：
@@ -90,11 +109,13 @@ mcp:
 | `KUBERNETES_IN_CLUSTER` | 在集群内使用 ServiceAccount Provider |
 | `KUBERNETES_KUBECONFIG_SOURCE` / `..._PATH` / `..._REFERENCE` / `..._CONTEXT` | 选择 kubeconfig Provider 和 context |
 | `KUBERNETES_ALLOWED_NAMESPACES` | 限制可见和可操作 Namespace；空列表表示不限制 |
-| `KUBERNETES_WRITE_ENABLED` | 业务层 REST/MCP 写总开关 |
+| `KUBERNETES_WRITE_ENABLED` | Kubernetes 变更总开关；不阻止目录的数据库写入 |
 | `KUBERNETES_COMMAND_TIMEOUT_SECONDS` | kubectl/Helm 写操作超时 |
 | `KUBERNETES_KUBECTL` / `KUBERNETES_HELM` | CLI 路径 |
 | `CONTROL_API_KEY` | REST 控制接口的共享 API key |
 | `MCP_ENABLED` / `MCP_WRITE_ENABLED` | MCP 总开关和写工具注册开关 |
+| `CATALOG_ENABLED` / `CATALOG_DATABASE_PATH` | 标准服务目录开关与 SQLite 文件，容器路径 `/data/olixops.db` |
+| `CATALOG_GATEWAY_*` / `CATALOG_PORT_START` / `CATALOG_PORT_END` | 固定共享 Higress 入口与端口池 |
 
 例如，仅在本机测试 MCP 写能力：
 
@@ -104,7 +125,7 @@ KUBERNETES_WRITE_ENABLED=true \
 go run ./cmd
 ```
 
-如果把 `SERVER_HOST` 改成非回环地址，必须设置 `CONTROL_API_KEY`，并在 REST 请求中发送 `X-Olixops-Control-Key`。这个 key 目前只保护 `/api/v1/cluster/...`，**不保护公开 MCP 路由**。
+如果把 `SERVER_HOST` 改成非回环地址，必须设置 `CONTROL_API_KEY`，并在 REST 请求中发送 `X-Olixops-Control-Key`。这个 key 保护 `/api/v1/cluster/...`、`/templates/...`、`/services/...`、`/ports/...`，**不保护公开 MCP 路由**。
 
 ## REST 接口
 
@@ -123,7 +144,9 @@ REST 遵循项目约定：查询使用 GET，带参数操作使用 POST，不使
 | POST | `/api/v1/cluster/kubectl/apply` | 校验并执行 kubectl apply，可 server-side dry-run | Control API key + 写开关 |
 | POST | `/api/v1/cluster/helm/upgrade` | Helm upgrade/install，带 chart 预检查 | Control API key + 写开关 |
 
-REST handler 当前把客户端输入错误统一映射为 400，把服务端/依赖错误统一映射为 503；详细错误只写入受控日志，后续可以按统一错误码继续细化。
+原有 cluster REST handler 使用 400/503 通用错误。新增目录接口使用相同 envelope，业务错误 HTTP 400 的 `data.reason` 为 PORT_IN_USE、REVISION_CONFLICT 等；未分类错误 HTTP 500。不输出上游原始错误。
+
+新增 `/api/v1/templates`、`/services`、`/ports` 三组接口，各组无参数列表 GET、带参数读取与操作 POST。完整 HTTP/MCP 对照见 [标准服务接口](docs/standard-services.md#http-与-mcp-对照)。
 
 ## MCP 能力
 
@@ -135,7 +158,7 @@ http://127.0.0.1:8091/api/v1/pub/mcp
 
 采用官方 Go SDK 的 stateless Streamable HTTP 和 JSON-RPC。MCP 不使用 REST 的 `code/msg/data` 包装；工具失败通过 MCP 的错误结果返回。请求体上限 4 MiB，读工具默认 30 秒超时，写工具使用 `kubernetes.command-timeout-seconds`。
 
-默认注册 16 个只读工具：
+原有 Kubernetes 能力包含 16 个只读工具：
 
 - `cluster_status`、`list_namespaces`、`list_storage_classes`
 - `list_resources`、`list_gateway_resources`、`get_resource`、`get_resource_yaml`、`list_resource_objects`
@@ -144,7 +167,7 @@ http://127.0.0.1:8091/api/v1/pub/mcp
 - `list_helm_releases`、`get_helm_status`、`get_helm_history`
 - `validate_manifest`
 
-启用后增加 13 个写工具：
+开启写开关后，原有 Kubernetes 能力增加 13 个写工具：
 
 - `dry_run_manifest`、`apply_manifest`
 - `helm_upgrade`、`helm_rollback`、`helm_uninstall`
@@ -153,7 +176,9 @@ http://127.0.0.1:8091/api/v1/pub/mcp
 - `create_namespace`、`delete_namespace`、`update_namespace_metadata`
 - `update_configmap`
 
-MCP 写工具要同时满足 `MCP_WRITE_ENABLED=true` 和 `KUBERNETES_WRITE_ENABLED=true`。工具开关、固定资源白名单、Namespace 范围和参数校验属于功能边界，不等于调用者授权。当前 `Authorizer` 默认允许调用，写工具只能用于受控测试环境。日志、事件、资源 status 和 Pod 日志可能含有业务敏感信息。
+目录开启时另有 11 个读工具和 8 个写工具，完整开启共 **48 个工具（27 读、21 写）**。新增模板/配置/端口与标准部署工具的清单、参数和状态机见 [标准服务目录](docs/standard-services.md)。
+
+`MCP_WRITE_ENABLED=true` 注册写工具；集群变更还需 `KUBERNETES_WRITE_ENABLED=true`。模板/配置/台账数据库写入不依赖 Kubernetes 写开关。工具开关、固定资源白名单、Namespace 范围和参数校验属于功能边界，不等于调用者授权。当前 `Authorizer` 默认允许调用，写工具只能用于受控测试环境。日志、事件、资源 status 和 Pod 日志可能含有业务敏感信息。
 
 资源白名单、Helm 预渲染规则、分页、日志限制、回滚语义和完整 JSON 示例见 [MCP 开发文档](docs/mcp-development.md)。
 
@@ -169,7 +194,9 @@ YAML apply、资源详情/列表/删除共享 [internal/domain/resources.go](int
 - `policy/v1`：PodDisruptionBudget
 - Gateway API：Gateway、HTTPRoute、TCPRoute 的受控版本
 
-Secret、RBAC、CRD、任意集群级资源、节点操作、Pod exec、kubeconfig 导出和任意 shell 命令均未开放。Namespace 只能通过专用工具管理；`default` 和 `kube-*` 禁止删除。Namespace 元数据更新只允许 labels 和 annotations，并通过显式删除键操作移除元数据。删除是单资源操作并使用 UID precondition；Namespace 删除是显式的大范围动作。扩缩容仅支持 Deployment/StatefulSet，重启和回滚支持 Deployment/StatefulSet/DaemonSet。
+通用接口的 Secret、RBAC、CRD、任意集群级资源、节点操作、Pod exec、kubeconfig 导出和任意 shell 命令均未开放。Namespace 只能通过专用工具管理；`default` 和 `kube-*` 禁止删除。Namespace 元数据更新只允许 labels 和 annotations，并通过显式删除键操作移除元数据。删除是单资源操作并使用 UID precondition；Namespace 删除是显式的大范围动作。扩缩容仅支持 Deployment/StatefulSet，重启和回滚支持 Deployment/StatefulSet/DaemonSet。
+
+标准服务部署只引用已有 Secret，并在部署前读取该特定 Secret 核对键；访问验证仅在内存中使用该凭据，不提供 Secret 内容读取工具。Namespace allowlist 需同时包含业务与 Higress Namespace；共享入口核对需要固定集群全 Namespace 的 TCPRoute 列表。
 
 Helm 只接受受控的 `repo/chart` 或 `oci://...` 形式，先下载并渲染，再检查存量和目标 manifest，禁用 hooks，不自动创建 Namespace；不保证兼容包含 Secret、RBAC、ServiceAccount 或其他未开放资源的 chart。预渲染不是安全沙箱，也不能保证变更事务性。
 
@@ -204,7 +231,7 @@ git diff --check
 1. **MCP 写权限尚未实现**：MCP 路由是公开路由，`DeferredAuthorizer` 默认放行。任何能访问 MCP 的调用者，在两个写开关都打开时都可以执行配置范围内的写操作。
 2. **REST 只有共享 API key**：没有用户身份、角色、token 轮换、撤销、Namespace 归属和动作级策略；API key 也不作用于 MCP。
 3. **缺少完整审计和审批**：当前日志只记录工具名、读写、耗时和成功状态，没有不可抵赖的主体、策略版本、审批、参数摘要、目标 UID/resourceVersion 和部分成功记录。
-4. **运行镜像缺少 kubectl/Helm**：容器中只有 Go 服务程序，写接口在未补充 CLI 的镜像中无法正常工作。
+4. **标准目录单副本**：SQLite 与进程内部署锁只支持单个协调器；必须持久化 `/data`，不能横向扩容或让多个服务进程同时执行部署。
 5. **写操作不具备事务性**：多文档 apply、Helm upgrade/rollback/uninstall、Namespace 删除都可能部分执行；超时后不能据此判断没有发生变更。
 
 ### 中优先级
@@ -213,9 +240,9 @@ git diff --check
 2. **Kubernetes 身份还需要最小权限化**：服务使用的 ServiceAccount/kubeconfig 权限必须由部署侧收敛，业务 Authorizer 不能替代 Kubernetes RBAC。
 3. **Helm 检查不是沙箱**：模板的 Capabilities、lookup、并发更新和实际 upgrade 之间存在差异，chart 来源、摘要绑定和 release 锁尚未实现。
 4. **读取数据可能带敏感内容**：事件 message、资源 status、Pod 日志和错误文本存在业务信息；现有通用字段过滤不能保证脱敏。
-5. **缺少限流、并发锁和幂等键**：重复重启、并发 Helm 更新和客户端重试可能造成重复或竞态操作。
+5. **通用操作仍缺少限流/幂等**：标准目录已增加实例锁、入口锁和持久化幂等键；通用重启、Helm 更新等仍可能重复或竞态。
 6. **状态接口是快照**：扩缩容、重启、回滚和 Helm 操作返回请求结果，不等待应用就绪；没有 watch、流式日志或统一 operation ID。
-7. **错误模型仍较粗**：REST 只区分 400/503，MCP 对外使用通用失败信息，客户端难以区分权限拒绝、资源不存在、超时和部分完成。
+7. **通用操作错误模型仍较粗**：标准目录已有业务 reason 和持久化阶段；原有操作仍使用通用错误。
 8. **版本和依赖未完全锁定**：Go、kubectl、Helm、Kubernetes server、Gateway API CRD 的兼容矩阵需要在部署流水线中固定并验证。
 
 ## 后续建议顺序
@@ -226,11 +253,13 @@ git diff --check
 4. 增加 Helm 来源/版本摘要绑定、实际提交对象复核、并发锁和单独的高风险审批。
 5. 为服务配置最小 Kubernetes RBAC，隔离 Namespace 管理身份和普通部署身份。
 6. 增加结构化审计、operation ID、状态查询/取消语义、限流、幂等和更细的错误码。
-7. 补充包含 kubectl/Helm 的运行镜像、版本探针和真实集群验收流水线。
+7. 完成镜像构建、CLI 版本兼容、真实 Redis/PG 存储、LB 转发和协议访问的环境验收。
 
 ## 文档索引
 
-- [MCP 开发文档](docs/mcp-development.md)：29 个工具的参数、行为、限制、调用样例和测试覆盖。
+- [标准服务目录](docs/standard-services.md)：已实现的 SQLite 配置、独立 Redis/PG、201 个端口、HTTP/MCP 参数与恢复流程。
+- [标准服务开发计划](docs/standard-service-development-plan.md)：原始八阶段计划及交付验收状态。
+- [MCP 开发文档](docs/mcp-development.md)：原有 29 个工具与新增 19 个标准服务工具的清单、限制和测试覆盖。
 - [MCP / REST 权限控制设计](docs/mcp-authorization-design.md)：认证、授权、审批、审计和 Kubernetes RBAC 的后续方案。
 - [配置文件](configs/config.yaml)：本地默认配置。
 - [MCP 集成测试](tests/mcp_test.go)：MCP 协议和工具发现测试。

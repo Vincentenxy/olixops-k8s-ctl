@@ -3,8 +3,11 @@ package mcp
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
+	catalogapp "olixops-k8s-ctl/internal/application/catalog"
+	catalogdomain "olixops-k8s-ctl/internal/domain/catalog"
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -53,6 +56,7 @@ type Service interface {
 }
 
 type Options struct {
+	Catalog      *catalogapp.Service
 	WriteEnabled bool
 	WriteTimeout time.Duration
 }
@@ -118,6 +122,9 @@ func NewHandler(service Service, version string, options ...Options) http.Handle
 	if opts.WriteEnabled {
 		registerWrites(server, service, opts.WriteTimeout)
 	}
+	if opts.Catalog != nil {
+		registerCatalog(server, opts.Catalog, opts.WriteEnabled, opts.WriteTimeout)
+	}
 	transport := mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return server }, &mcp.StreamableHTTPOptions{
 		Stateless:           true,
 		JSONResponse:        true,
@@ -141,6 +148,10 @@ func registerTool[In, Out any](server *mcp.Server, name, description string, rea
 				// Kubernetes/parse errors can include credentials, addresses or submitted YAML.
 				// Never forward or log their raw contents on this anonymous endpoint.
 				var zero Out
+				var business *catalogdomain.Error
+				if errors.As(err, &business) {
+					return nil, zero, business
+				}
 				return nil, zero, fmt.Errorf("%s failed: check input, feature switches, configured scope, policy hook and cluster availability", name)
 			}
 			return nil, out, nil

@@ -1,0 +1,83 @@
+# Prerequisites: namespace olixops, preconfigured ServiceAccount/RBAC named
+# olixops-k8s-ctl and Secret olixops-control with key api-key. Not auto-applied.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: olixops-catalog
+  namespace: olixops
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: 1Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: olixops-k8s-ctl
+  namespace: olixops
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: olixops-k8s-ctl
+  template:
+    metadata:
+      labels:
+        app: olixops-k8s-ctl
+    spec:
+      serviceAccountName: olixops-k8s-ctl
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+      containers:
+        - name: controller
+          image: olixops-k8s-ctl:catalog-dev
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: SERVER_HOST
+              value: 0.0.0.0
+            - name: KUBERNETES_IN_CLUSTER
+              value: "true"
+            - name: CONTROL_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: olixops-control
+                  key: api-key
+            - name: CATALOG_DATABASE_PATH
+              value: /data/olixops.db
+          ports:
+            - name: http
+              containerPort: 8091
+          readinessProbe:
+            httpGet:
+              path: /api/v1/pub/ready
+              port: http
+          livenessProbe:
+            httpGet:
+              path: /api/v1/pub/health
+              port: http
+          volumeMounts:
+            - name: catalog
+              mountPath: /data
+      volumes:
+        - name: catalog
+          persistentVolumeClaim:
+            claimName: olixops-catalog
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: olixops-k8s-ctl
+  namespace: olixops
+spec:
+  selector:
+    app: olixops-k8s-ctl
+  ports:
+    - name: http
+      port: 8091
+      targetPort: http

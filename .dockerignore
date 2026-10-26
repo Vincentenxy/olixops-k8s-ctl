@@ -1,0 +1,12 @@
+.git
+.idea
+.vscode
+.local
+runtime
+data
+dist
+*.db
+*.db-*
+*.sqlite*
+*.log
+configs/*.local.yaml

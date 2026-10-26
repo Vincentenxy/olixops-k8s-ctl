@@ -11,6 +11,9 @@ import (
 	"time"
 
 	"olixops-k8s-ctl/internal/application"
+	catalogapp "olixops-k8s-ctl/internal/application/catalog"
+	catalogdomain "olixops-k8s-ctl/internal/domain/catalog"
+	"olixops-k8s-ctl/internal/infrastructure/catalogdb"
 	"olixops-k8s-ctl/internal/infrastructure/config"
 	"olixops-k8s-ctl/internal/infrastructure/execctl"
 	"olixops-k8s-ctl/internal/infrastructure/kubeconfig"
@@ -58,7 +61,20 @@ func main() {
 		TimeoutSeconds: cfg.Kubernetes.CommandTimeoutSecond,
 	})
 	clusterService := application.NewClusterService(clusterClient, runner, cfg.Kubernetes)
-	r, err := router.New(cfg, clusterService)
+	var catalogService *catalogapp.Service
+	if cfg.Catalog.Enabled {
+		store, openErr := catalogdb.Open(cfg.Catalog.DatabasePath)
+		if openErr != nil {
+			logger.L().Fatal("init catalog database failed", zap.Error(openErr))
+		}
+		defer store.Close()
+		c := cfg.Catalog
+		catalogService, err = catalogapp.New(context.Background(), store, application.CatalogCluster{Service: clusterService}, catalogdomain.Gateway{ID: c.GatewayID, Cluster: c.Cluster, Namespace: c.GatewayNamespace, Service: c.GatewayService, Name: c.GatewayName, PortStart: c.PortStart, PortEnd: c.PortEnd}, nil)
+		if err != nil {
+			logger.L().Fatal("init catalog failed", zap.Error(err))
+		}
+	}
+	r, err := router.NewWithCatalog(cfg, clusterService, catalogService)
 	if err != nil {
 		logger.L().Fatal("init router failed", zap.Error(err))
 	}

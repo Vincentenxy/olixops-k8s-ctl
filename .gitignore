@@ -9,3 +9,12 @@ configs/*.local.yaml
 
 coverage.out
 dist/
+
+# Embedded catalog runtime state and SQLite sidecars
+data/
+*.db
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
