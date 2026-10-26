@@ -1,6 +1,10 @@
 .git
 .idea
 .vscode
+.codex
+.env
+.env.*
+.kube
 .local
 runtime
 data
@@ -9,4 +13,5 @@ dist
 *.db-*
 *.sqlite*
 *.log
+coverage.out
 configs/*.local.yaml

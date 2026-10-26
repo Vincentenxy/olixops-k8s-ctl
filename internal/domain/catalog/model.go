@@ -19,15 +19,18 @@ func (e *Error) Error() string        { return fmt.Sprintf("%s: %s", e.Code, e.M
 func Fail(code, message string) error { return &Error{code, message} }
 
 type Parameters struct {
-	Image        string `json:"image,omitempty"`
-	CPU          string `json:"cpu,omitempty"`
-	Memory       string `json:"memory,omitempty"`
-	Storage      string `json:"storage,omitempty"`
-	StorageClass string `json:"storageClass,omitempty"`
-	SecretName   string `json:"secretName,omitempty"`
-	SecretKey    string `json:"secretKey,omitempty"`
-	Database     string `json:"database,omitempty"`
-	Username     string `json:"username,omitempty"`
+	Image            string `json:"image,omitempty"`
+	CPU              string `json:"cpu,omitempty"`
+	Memory           string `json:"memory,omitempty"`
+	Storage          string `json:"storage,omitempty"`
+	StorageClass     string `json:"storageClass,omitempty"`
+	SecretName       string `json:"secretName,omitempty"`
+	SecretKey        string `json:"secretKey,omitempty"`
+	Database         string `json:"database,omitempty"`
+	Username         string `json:"username,omitempty"`
+	Content          string `json:"content,omitempty"`
+	RuntimeClassName string `json:"runtimeClassName,omitempty"`
+	TTLSeconds       int    `json:"ttlSeconds,omitempty"`
 }
 type Template struct {
 	ID               string     `json:"id"`
@@ -51,16 +54,17 @@ type Instance struct {
 	CreatedAt       time.Time `json:"createdAt"`
 }
 type Revision struct {
-	ID            string     `json:"id"`
-	InstanceID    string     `json:"instanceId"`
-	Number        int        `json:"revision"`
-	TemplateID    string     `json:"templateId"`
-	Parameters    Parameters `json:"parameters"`
-	YAML          string     `json:"yaml"`
-	Digest        string     `json:"digest"`
-	RequestID     string     `json:"requestId"`
-	RequestDigest string     `json:"requestDigest"`
-	CreatedAt     time.Time  `json:"createdAt"`
+	StandardRequestDigest string     `json:"standardRequestDigest,omitempty"`
+	ID                    string     `json:"id"`
+	InstanceID            string     `json:"instanceId"`
+	Number                int        `json:"revision"`
+	TemplateID            string     `json:"templateId"`
+	Parameters            Parameters `json:"parameters"`
+	YAML                  string     `json:"yaml"`
+	Digest                string     `json:"digest"`
+	RequestID             string     `json:"requestId"`
+	RequestDigest         string     `json:"requestDigest"`
+	CreatedAt             time.Time  `json:"createdAt"`
 }
 type Resource struct {
 	APIVersion string `json:"apiVersion"`
@@ -70,6 +74,7 @@ type Resource struct {
 	UID        string `json:"uid,omitempty"`
 }
 type Observation struct {
+	Address             string     `json:"address,omitempty"`
 	Resources           []Resource `json:"resources"`
 	Missing             []Resource `json:"missing"`
 	WorkloadReady       bool       `json:"workloadReady"`
@@ -99,6 +104,7 @@ type Deployment struct {
 	LastError     string      `json:"lastError,omitempty"`
 	CreatedAt     time.Time   `json:"createdAt"`
 	UpdatedAt     time.Time   `json:"updatedAt"`
+	ExpiresAt     *time.Time  `json:"expiresAt,omitempty"`
 }
 type RouteMapping struct {
 	Namespace        string `json:"namespace"`
@@ -195,6 +201,7 @@ type Cluster interface {
 	Verify(context.Context, Gateway, Deployment, Instance, Parameters) (AccessReport, error)
 	Check(context.Context, string, string) error
 	Snapshot(context.Context, Gateway) (Snapshot, error)
+	// Preflight ensures the explicit Namespace exists, then checks storage and credentials.
 	Preflight(context.Context, Instance, Parameters) error
 	EnsurePort(context.Context, Gateway, int, string) error
 	Apply(context.Context, string, string, bool) error

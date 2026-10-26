@@ -29,12 +29,13 @@ type Service struct {
 	cluster    d.Cluster
 	gateway    d.Gateway
 	authorizer domain.Authorizer
+	defaults   Defaults
 	locks      sync.Map
 	// A sync and a deploy must not race in this single-replica coordinator.
 	gatewayLock sync.Mutex
 }
 
-func New(ctx context.Context, repo d.Repository, cluster d.Cluster, gateway d.Gateway, authorizer domain.Authorizer) (*Service, error) {
+func New(ctx context.Context, repo d.Repository, cluster d.Cluster, gateway d.Gateway, authorizer domain.Authorizer, options ...Option) (*Service, error) {
 	if gateway.ID == "" || gateway.Cluster == "" || len(validation.IsDNS1123Label(gateway.Namespace)) > 0 || len(validation.IsDNS1123Subdomain(gateway.Name)) > 0 || len(validation.IsDNS1123Subdomain(gateway.Service)) > 0 || gateway.PortStart < 1 || gateway.PortEnd > 65535 || gateway.PortEnd < gateway.PortStart || gateway.PortEnd-gateway.PortStart > 1000 {
 		return nil, fmt.Errorf("invalid catalog gateway configuration")
 	}
@@ -42,6 +43,9 @@ func New(ctx context.Context, repo d.Repository, cluster d.Cluster, gateway d.Ga
 		authorizer = domain.DeferredAuthorizer{}
 	}
 	s := &Service{repo: repo, cluster: cluster, gateway: gateway, authorizer: authorizer}
+	for _, option := range options {
+		option(s)
+	}
 	err := repo.Update(ctx, func(st *d.State) error {
 		for _, t := range seeds() {
 			if _, ok := st.Templates[t.ID]; !ok {
@@ -120,7 +124,7 @@ func stamp(raw, id string, revision int) (string, error) {
 		}
 		ann[d.RevisionAnnotation] = strconv.Itoa(revision)
 		u.SetAnnotations(ann)
-		if u.GetKind() == "StatefulSet" {
+		if u.GetKind() == "StatefulSet" || u.GetKind() == "Deployment" {
 			podAnn, _, _ := unstructured.NestedStringMap(u.Object, "spec", "template", "metadata", "annotations")
 			if podAnn == nil {
 				podAnn = map[string]string{}
@@ -140,15 +144,16 @@ func stamp(raw, id string, revision int) (string, error) {
 }
 
 type SaveConfigInput struct {
-	InstanceID       string       `json:"instanceId,omitempty"`
-	OwnerID          string       `json:"ownerId"`
-	Name             string       `json:"name"`
-	Namespace        string       `json:"namespace"`
-	Software         string       `json:"software"`
-	TemplateVersion  int          `json:"templateVersion"`
-	Parameters       d.Parameters `json:"parameters"`
-	ExpectedRevision int          `json:"expectedRevision"`
-	RequestID        string       `json:"requestId,omitempty"`
+	StandardRequestDigest string       `json:"-"`
+	InstanceID            string       `json:"instanceId,omitempty"`
+	OwnerID               string       `json:"ownerId"`
+	Name                  string       `json:"name"`
+	Namespace             string       `json:"namespace"`
+	Software              string       `json:"software"`
+	TemplateVersion       int          `json:"templateVersion"`
+	Parameters            d.Parameters `json:"parameters"`
+	ExpectedRevision      int          `json:"expectedRevision"`
+	RequestID             string       `json:"requestId,omitempty"`
 }
 type SavedConfig struct {
 	Instance d.Instance `json:"instance"`
@@ -201,7 +206,8 @@ func (s *Service) build(ctx context.Context, st *d.State, in SaveConfigInput, pr
 	if err := validateParams(in.Software, p); err != nil {
 		return out, err
 	}
-	if i.CurrentRevision > 0 {
+	profile, _ := d.Profile(in.Software)
+	if i.CurrentRevision > 0 && profile.Persistent {
 		old := st.Revisions[fmt.Sprintf("%s:%d", i.ID, i.CurrentRevision)]
 		a, _ := resource.ParseQuantity(old.Parameters.Storage)
 		b, _ := resource.ParseQuantity(p.Storage)
@@ -223,11 +229,12 @@ func (s *Service) build(ctx context.Context, st *d.State, in SaveConfigInput, pr
 	if err = s.cluster.Check(ctx, raw, i.Namespace); err != nil {
 		return out, err
 	}
-	r := d.Revision{ID: fmt.Sprintf("%s:%d", i.ID, rev), InstanceID: i.ID, Number: rev, TemplateID: t.ID, Parameters: p, YAML: raw, Digest: digest(raw), RequestID: in.RequestID, RequestDigest: digest(in), CreatedAt: time.Now().UTC()}
+	r := d.Revision{StandardRequestDigest: in.StandardRequestDigest, ID: fmt.Sprintf("%s:%d", i.ID, rev), InstanceID: i.ID, Number: rev, TemplateID: t.ID, Parameters: p, YAML: raw, Digest: digest(raw), RequestID: in.RequestID, RequestDigest: digest(in), CreatedAt: time.Now().UTC()}
 	i.CurrentRevision = rev
 	return SavedConfig{i, r}, nil
 }
 func (s *Service) PreviewConfig(ctx context.Context, in SaveConfigInput) (SavedConfig, error) {
+	in.Software = d.NormalizeSoftware(in.Software)
 	var out SavedConfig
 	if err := s.policy(ctx, "config.preview", false, in); err != nil {
 		return out, err
@@ -236,6 +243,7 @@ func (s *Service) PreviewConfig(ctx context.Context, in SaveConfigInput) (SavedC
 	return out, err
 }
 func (s *Service) SaveConfig(ctx context.Context, in SaveConfigInput) (SavedConfig, error) {
+	in.Software = d.NormalizeSoftware(in.Software)
 	var out SavedConfig
 	if err := s.policy(ctx, "config.save", true, in); err != nil {
 		return out, err
@@ -243,7 +251,7 @@ func (s *Service) SaveConfig(ctx context.Context, in SaveConfigInput) (SavedConf
 	err := s.repo.Update(ctx, func(st *d.State) error {
 		for _, r := range st.Revisions {
 			if r.RequestID == in.RequestID {
-				if r.RequestDigest != digest(in) {
+				if (in.StandardRequestDigest != "" && r.StandardRequestDigest != in.StandardRequestDigest) || (in.StandardRequestDigest == "" && (r.StandardRequestDigest != "" || r.RequestDigest != digest(in))) {
 					return d.Fail("IDEMPOTENCY_CONFLICT", "requestId already used with different input")
 				}
 				out = SavedConfig{st.Instances[r.InstanceID], r}

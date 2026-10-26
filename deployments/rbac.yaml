@@ -1,0 +1,161 @@
+# Baseline permissions for standard services and common workload operations.
+# Review wx-test-ns-001/wx-test-ns-002 and the shared Higress names before applying.
+# Assumes the ServiceAccount olixops/olixops-k8s-ctl already exists.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: olixops-k8s-ctl-discovery
+rules:
+  - apiGroups: [""]
+    resources: [namespaces]
+    verbs: [get, list]
+  - apiGroups: [storage.k8s.io]
+    resources: [storageclasses]
+    verbs: [get, list]
+  - apiGroups: [gateway.networking.k8s.io]
+    resources: [gatewayclasses]
+    verbs: [get, list]
+  # Port reconciliation must see routes from every namespace sharing the LB.
+  - apiGroups: [gateway.networking.k8s.io]
+    resources: [tcproutes]
+    verbs: [get, list]
+  - nonResourceURLs: [/version, /api, /api/*, /apis, /apis/*, /openapi, /openapi/*]
+    verbs: [get]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: olixops-k8s-ctl-discovery
+subjects:
+  - kind: ServiceAccount
+    name: olixops-k8s-ctl
+    namespace: olixops
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: olixops-k8s-ctl-discovery
+---
+# Namespace creation is cluster-scoped. This grants only create, not mutation
+# of existing namespaces, and does not grant workload rights in a new namespace.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: olixops-k8s-ctl-namespace-creator
+rules:
+  - apiGroups: [""]
+    resources: [namespaces]
+    verbs: [create]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: olixops-k8s-ctl-namespace-creator
+subjects:
+  - kind: ServiceAccount
+    name: olixops-k8s-ctl
+    namespace: olixops
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: olixops-k8s-ctl-namespace-creator
+---
+# This reusable ClusterRole is granted only through namespaced RoleBindings.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: olixops-k8s-ctl-workloads
+rules:
+  - apiGroups: [""]
+    resources: [pods, services, configmaps, persistentvolumeclaims]
+    verbs: [get, list, watch, create, update, patch, delete]
+  - apiGroups: [""]
+    resources: [pods/log, events]
+    verbs: [get, list, watch]
+  # Standard templates reference existing Secrets; this does not grant writes.
+  - apiGroups: [""]
+    resources: [secrets]
+    verbs: [get]
+  - apiGroups: [apps]
+    resources: [deployments, statefulsets, daemonsets]
+    verbs: [get, list, watch, create, update, patch, delete]
+  - apiGroups: [apps]
+    resources: [deployments/scale, statefulsets/scale]
+    verbs: [get, update, patch]
+  - apiGroups: [apps]
+    resources: [replicasets, controllerrevisions]
+    verbs: [get, list, watch]
+  - apiGroups: [batch]
+    resources: [jobs, cronjobs]
+    verbs: [get, list, watch, create, update, patch, delete]
+  - apiGroups: [networking.k8s.io]
+    resources: [ingresses, networkpolicies]
+    verbs: [get, list, watch, create, update, patch, delete]
+  - apiGroups: [autoscaling]
+    resources: [horizontalpodautoscalers]
+    verbs: [get, list, watch, create, update, patch, delete]
+  - apiGroups: [policy]
+    resources: [poddisruptionbudgets]
+    verbs: [get, list, watch, create, update, patch, delete]
+  - apiGroups: [gateway.networking.k8s.io]
+    resources: [gateways, httproutes, tcproutes]
+    verbs: [get, list, watch, create, update, patch, delete]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: olixops-k8s-ctl-workloads
+  namespace: wx-test-ns-001
+subjects:
+  - kind: ServiceAccount
+    name: olixops-k8s-ctl
+    namespace: olixops
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: olixops-k8s-ctl-workloads
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: olixops-k8s-ctl-workloads
+  namespace: wx-test-ns-002
+subjects:
+  - kind: ServiceAccount
+    name: olixops-k8s-ctl
+    namespace: olixops
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: olixops-k8s-ctl-workloads
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: olixops-k8s-ctl-gateway
+  namespace: higress-system
+rules:
+  - apiGroups: [""]
+    resources: [services]
+    resourceNames: [higress-gateway]
+    verbs: [get, update, patch]
+  - apiGroups: [gateway.networking.k8s.io]
+    resources: [gateways]
+    resourceNames: [higress-tcp-gateway]
+    verbs: [update, patch]
+  - apiGroups: [gateway.networking.k8s.io]
+    resources: [gateways, httproutes, tcproutes]
+    verbs: [get, list]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: olixops-k8s-ctl-gateway
+  namespace: higress-system
+subjects:
+  - kind: ServiceAccount
+    name: olixops-k8s-ctl
+    namespace: olixops
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: olixops-k8s-ctl-gateway

@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"net"
+	"os"
 	"strings"
 
 	"github.com/spf13/viper"
@@ -18,15 +19,18 @@ type Config struct {
 }
 
 type CatalogConfig struct {
-	Enabled          bool   `mapstructure:"enabled"`
-	DatabasePath     string `mapstructure:"database-path"`
-	GatewayID        string `mapstructure:"gateway-id"`
-	Cluster          string `mapstructure:"cluster"`
-	GatewayNamespace string `mapstructure:"gateway-namespace"`
-	GatewayService   string `mapstructure:"gateway-service"`
-	GatewayName      string `mapstructure:"gateway-name"`
-	PortStart        int    `mapstructure:"port-start"`
-	PortEnd          int    `mapstructure:"port-end"`
+	DefaultOwner        string `mapstructure:"default-owner"`
+	DefaultStorageClass string `mapstructure:"default-storage-class"`
+	SandboxRuntimeClass string `mapstructure:"sandbox-runtime-class"`
+	Enabled             bool   `mapstructure:"enabled"`
+	DatabasePath        string `mapstructure:"database-path"`
+	GatewayID           string `mapstructure:"gateway-id"`
+	Cluster             string `mapstructure:"cluster"`
+	GatewayNamespace    string `mapstructure:"gateway-namespace"`
+	GatewayService      string `mapstructure:"gateway-service"`
+	GatewayName         string `mapstructure:"gateway-name"`
+	PortStart           int    `mapstructure:"port-start"`
+	PortEnd             int    `mapstructure:"port-end"`
 }
 
 type MCPConfig struct {
@@ -63,7 +67,8 @@ type KubeconfigConfig struct {
 }
 
 type ControlConfig struct {
-	APIKey string `mapstructure:"api-key"`
+	APIKey     string `mapstructure:"api-key"`
+	APIKeyFile string `mapstructure:"api-key-file"`
 }
 
 func Load(path string) (*Config, error) {
@@ -73,7 +78,11 @@ func Load(path string) (*Config, error) {
 	v.AddConfigPath(path)
 	v.SetEnvKeyReplacer(strings.NewReplacer(".", "_", "-", "_"))
 	v.AutomaticEnv()
+	v.SetDefault("control.api-key-file", "")
 	v.SetDefault("catalog.enabled", false)
+	v.SetDefault("catalog.default-owner", "poc")
+	v.SetDefault("catalog.default-storage-class", "local-path")
+	v.SetDefault("catalog.sandbox-runtime-class", "")
 	v.SetDefault("catalog.database-path", "./data/olixops.db")
 	v.SetDefault("catalog.gateway-id", "higress")
 	v.SetDefault("catalog.cluster", "configured")
@@ -100,8 +109,21 @@ func Load(path string) (*Config, error) {
 	if cfg.Server.Mode == "" {
 		cfg.Server.Mode = "debug"
 	}
+	if cfg.Control.APIKeyFile != "" {
+		if cfg.Control.APIKey != "" {
+			return nil, fmt.Errorf("configure only one of control.api-key and control.api-key-file")
+		}
+		key, err := os.ReadFile(cfg.Control.APIKeyFile)
+		if err != nil {
+			return nil, fmt.Errorf("read control API key file failed")
+		}
+		cfg.Control.APIKey = strings.TrimRight(string(key), "\r\n")
+		if strings.TrimSpace(cfg.Control.APIKey) == "" {
+			return nil, fmt.Errorf("control API key file is empty")
+		}
+	}
 	if !isLoopbackHost(cfg.Server.Host) && cfg.Control.APIKey == "" {
-		return nil, fmt.Errorf("control.api-key is required when server.host is not loopback")
+		return nil, fmt.Errorf("control.api-key or control.api-key-file is required when server.host is not loopback")
 	}
 	if cfg.Kubernetes.CommandTimeoutSecond < 1 {
 		cfg.Kubernetes.CommandTimeoutSecond = 120

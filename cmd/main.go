@@ -69,10 +69,33 @@ func main() {
 		}
 		defer store.Close()
 		c := cfg.Catalog
-		catalogService, err = catalogapp.New(context.Background(), store, application.CatalogCluster{Service: clusterService}, catalogdomain.Gateway{ID: c.GatewayID, Cluster: c.Cluster, Namespace: c.GatewayNamespace, Service: c.GatewayService, Name: c.GatewayName, PortStart: c.PortStart, PortEnd: c.PortEnd}, nil)
+		catalogService, err = catalogapp.New(context.Background(), store, application.CatalogCluster{Service: clusterService}, catalogdomain.Gateway{ID: c.GatewayID, Cluster: c.Cluster, Namespace: c.GatewayNamespace, Service: c.GatewayService, Name: c.GatewayName, PortStart: c.PortStart, PortEnd: c.PortEnd}, nil, catalogapp.WithDefaults(catalogapp.Defaults{OwnerID: c.DefaultOwner, StorageClass: c.DefaultStorageClass, RuntimeClassName: c.SandboxRuntimeClass}))
 		if err != nil {
 			logger.L().Fatal("init catalog failed", zap.Error(err))
 		}
+	}
+	if catalogService != nil {
+		expiryCtx, stopExpiry := context.WithCancel(context.Background())
+		expiryDone := make(chan struct{})
+		go func() {
+			defer close(expiryDone)
+			ticker := time.NewTicker(time.Minute)
+			defer ticker.Stop()
+			for {
+				runCtx, cancelRun := context.WithTimeout(expiryCtx, 120*time.Second)
+				err := catalogService.ExpireSandboxes(runCtx, time.Now().UTC())
+				cancelRun()
+				if err != nil && expiryCtx.Err() == nil {
+					logger.L().Warn("sandbox expiry cleanup pending")
+				}
+				select {
+				case <-expiryCtx.Done():
+					return
+				case <-ticker.C:
+				}
+			}
+		}()
+		defer func() { stopExpiry(); <-expiryDone }()
 	}
 	r, err := router.NewWithCatalog(cfg, clusterService, catalogService)
 	if err != nil {

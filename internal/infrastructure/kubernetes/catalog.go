@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"net"
+	"strconv"
 	"strings"
 
 	corev1 "k8s.io/api/core/v1"
@@ -233,17 +235,38 @@ func (c *Client) CatalogEnsurePort(ctx context.Context, g d.Gateway, port int, n
 		return err
 	})
 }
-func (c *Client) CatalogPreflight(ctx context.Context, i d.Instance, p d.Parameters) error {
-	ns, err := c.core.CoreV1().Namespaces().Get(ctx, i.Namespace, metav1.GetOptions{})
-	if err != nil {
-		return d.Fail("NAMESPACE_UNAVAILABLE", "create the instance Namespace before deployment")
+
+// CatalogNamespaceExists preserves NotFound as the only createable state.
+// An inaccessible or terminating namespace must never be treated as missing.
+func (c *Client) CatalogNamespaceExists(ctx context.Context, name string) (bool, error) {
+	ns, err := c.core.CoreV1().Namespaces().Get(ctx, name, metav1.GetOptions{})
+	if apierrors.IsNotFound(err) {
+		return false, nil
 	}
-	if ns.DeletionTimestamp != nil {
-		return d.Fail("NAMESPACE_UNAVAILABLE", "instance Namespace is terminating")
-	}
-	_, err = c.core.StorageV1().StorageClasses().Get(ctx, p.StorageClass, metav1.GetOptions{})
 	if err != nil {
-		return d.Fail("STORAGECLASS_UNAVAILABLE", "configured StorageClass is unavailable")
+		return false, d.Fail("NAMESPACE_UNAVAILABLE", "cannot read the requested Namespace; check permissions and cluster connectivity")
+	}
+	if ns.DeletionTimestamp != nil || ns.Status.Phase == corev1.NamespaceTerminating {
+		return false, d.Fail("NAMESPACE_TERMINATING", "requested Namespace is terminating; wait for deletion or specify another Namespace")
+	}
+	return true, nil
+}
+
+// CatalogPreflightResources checks storage/credentials after the application has
+// ensured the Namespace exists. It does not repeat that Namespace lookup.
+func (c *Client) CatalogPreflightResources(ctx context.Context, i d.Instance, p d.Parameters) error {
+	profile, ok := d.Profile(i.Software)
+	if !ok {
+		return d.Fail("UNSUPPORTED_SOFTWARE", "standard service software is not supported")
+	}
+	if profile.Persistent {
+		_, err := c.core.StorageV1().StorageClasses().Get(ctx, p.StorageClass, metav1.GetOptions{})
+		if err != nil {
+			return d.Fail("STORAGECLASS_UNAVAILABLE", "configured StorageClass is unavailable")
+		}
+	}
+	if p.SecretName == "" {
+		return nil
 	}
 	secret, err := c.core.CoreV1().Secrets(i.Namespace).Get(ctx, p.SecretName, metav1.GetOptions{})
 	if err != nil {
@@ -305,7 +328,7 @@ func (c *Client) CatalogDelete(ctx context.Context, r d.Resource) error {
 		return d.Fail("RESOURCE_IDENTITY_MISSING", "deletion requires a recorded UID")
 	}
 	switch r.Kind {
-	case "TCPRoute", "StatefulSet", "Service", "ConfigMap":
+	case "TCPRoute", "StatefulSet", "Deployment", "Service", "ConfigMap":
 	default:
 		return d.Fail("RESOURCE_DELETE_FORBIDDEN", "only owned instance workloads, Services, ConfigMaps and routes can be deleted")
 	}
@@ -350,7 +373,7 @@ func (c *Client) CatalogInspect(ctx context.Context, dep d.Deployment, g d.Gatew
 		return out, err
 	}
 	out.Resources = inv
-	workloadCount, pvcCount, routeCount := 0, 0, 0
+	workloadCount, routeCount := 0, 0
 	for _, r := range inv {
 		for _, old := range dep.Resources {
 			if r.Kind == old.Kind && r.Namespace == old.Namespace && r.Name == old.Name && old.UID != "" && r.UID != "" && old.UID != r.UID {
@@ -361,7 +384,7 @@ func (c *Client) CatalogInspect(ctx context.Context, dep d.Deployment, g d.Gatew
 			out.Missing = append(out.Missing, r)
 		}
 		switch r.Kind {
-		case "StatefulSet":
+		case "StatefulSet", "Deployment":
 			workloadCount++
 			if r.UID == "" {
 				out.WorkloadReady = false
@@ -373,7 +396,6 @@ func (c *Client) CatalogInspect(ctx context.Context, dep d.Deployment, g d.Gatew
 			}
 			out.WorkloadReady = out.WorkloadReady && status.Complete
 		case "PersistentVolumeClaim":
-			pvcCount++
 			if r.UID == "" {
 				out.PVCBound = false
 				continue
@@ -417,7 +439,6 @@ func (c *Client) CatalogInspect(ctx context.Context, dep d.Deployment, g d.Gatew
 		}
 	}
 	out.WorkloadReady = out.WorkloadReady && workloadCount > 0
-	out.PVCBound = out.PVCBound && pvcCount > 0
 	out.RouteReady = out.RouteReady && routeCount > 0
 	res, err := c.resource(ctx, "Gateway", g.Namespace)
 	if err != nil {
@@ -439,5 +460,19 @@ func (c *Client) CatalogInspect(ctx context.Context, dep d.Deployment, g d.Gatew
 		}
 	}
 	out.GatewayReady = out.GatewayReady && listenerReady
+	svc, err := c.core.CoreV1().Services(g.Namespace).Get(ctx, g.Service, metav1.GetOptions{})
+	if err != nil {
+		return out, err
+	}
+	if len(svc.Status.LoadBalancer.Ingress) > 0 {
+		entry := svc.Status.LoadBalancer.Ingress[0]
+		host := entry.IP
+		if host == "" {
+			host = entry.Hostname
+		}
+		if host != "" {
+			out.Address = net.JoinHostPort(host, strconv.Itoa(dep.Port))
+		}
+	}
 	return out, nil
 }

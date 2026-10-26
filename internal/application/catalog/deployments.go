@@ -80,20 +80,44 @@ func (s *Service) Prepare(ctx context.Context, in PrepareInput) (d.Deployment, e
 		if !ok {
 			return d.Fail("NOT_FOUND", "configuration revision does not exist")
 		}
+		port := in.Port
 		if i.DeploymentID != "" {
 			old := st.Deployments[i.DeploymentID]
 			if old.Phase != "applied" && old.Phase != "ready" {
 				return d.Fail("DEPLOYMENT_ACTIVE", "reconcile, deploy or delete the existing deployment first")
 			}
-			if old.Port != in.Port {
+			if port == 0 {
+				port = old.Port
+			}
+			if old.Port != port {
 				return d.Fail("PORT_CHANGE_REQUIRES_DELETE", "delete existing instance deployment before changing external ports")
 			}
 		}
-		p, err := s.claim(st, i, in.Port, in.RequestID)
+		if port == 0 {
+			for _, existing := range st.Ports {
+				if existing.GatewayID == s.gateway.ID && existing.InstanceID == i.ID && existing.State == "reserved" && !existing.Conflict {
+					port = existing.Port
+					break
+				}
+			}
+		}
+		if port == 0 {
+			for candidate := s.gateway.PortStart; candidate <= s.gateway.PortEnd; candidate++ {
+				p := st.Ports[s.portID(candidate)]
+				if (p.State == "free" && !p.Conflict && len(p.ExternalRefs) == 0) || (p.InstanceID == i.ID && p.State == "reserved" && !p.Conflict) {
+					port = candidate
+					break
+				}
+			}
+			if port == 0 {
+				return d.Fail("PORT_POOL_EXHAUSTED", "no available external port")
+			}
+		}
+		p, err := s.claim(st, i, port, in.RequestID)
 		if err != nil {
 			return err
 		}
-		route, err := routeYAML(i, s.gateway, in.Port, in.Revision, snap.TCPRouteVersion)
+		route, err := routeYAML(i, s.gateway, port, in.Revision, snap.TCPRouteVersion)
 		if err != nil {
 			return err
 		}
@@ -102,14 +126,15 @@ func (s *Service) Prepare(ctx context.Context, in PrepareInput) (d.Deployment, e
 			return err
 		}
 		now := time.Now().UTC()
-		out = d.Deployment{ID: uuid.NewString(), InstanceID: i.ID, Revision: r.Number, Port: in.Port, GatewayID: s.gateway.ID, YAML: raw, Digest: digest(raw), RequestID: in.RequestID, RequestDigest: digest(in), Phase: "prepared", Stage: "prepared", CreatedAt: now, UpdatedAt: now}
+		out = d.Deployment{ID: uuid.NewString(), InstanceID: i.ID, Revision: r.Number, Port: port, GatewayID: s.gateway.ID, YAML: raw, Digest: digest(raw), RequestID: in.RequestID, RequestDigest: digest(in), Phase: "prepared", Stage: "prepared", CreatedAt: now, UpdatedAt: now}
 		// Preserve known UIDs across configuration revisions and crash recovery.
 		if i.DeploymentID != "" {
 			out.Resources = st.Deployments[i.DeploymentID].Resources
+			out.ExpiresAt = st.Deployments[i.DeploymentID].ExpiresAt
 		}
 		p.DeploymentID = out.ID
 		p.Route = i.ResourceName + "-route"
-		p.Listener = listenerName(in.Port)
+		p.Listener = listenerName(port)
 		st.Ports[p.ID] = p
 		i.DeploymentID = out.ID
 		st.Instances[i.ID] = i
@@ -231,6 +256,9 @@ func (s *Service) Deploy(ctx context.Context, in DeploymentInput) (d.Deployment,
 	if err != nil {
 		return dep, err
 	}
+	if dep.ExpiresAt != nil && !time.Now().Before(*dep.ExpiresAt) {
+		return dep, d.Fail("SANDBOX_EXPIRED", "sandbox expired; delete it and create a new instance")
+	}
 	if dep.Digest != digest(dep.YAML) {
 		return dep, d.Fail("ARTIFACT_DIGEST_MISMATCH", "saved deployment artifact changed")
 	}
@@ -260,6 +288,10 @@ func (s *Service) Deploy(ctx context.Context, in DeploymentInput) (d.Deployment,
 	dep.Resources, err = mergeInventory(dep.Resources, inventory)
 	if err != nil {
 		return dep, err
+	}
+	if i.Software == "sandbox" && dep.ExpiresAt == nil {
+		expires := time.Now().UTC().Add(time.Duration(rev.Parameters.TTLSeconds) * time.Second)
+		dep.ExpiresAt = &expires
 	}
 	dep.Phase = "applying"
 	dep.Stage = "dry-run"
@@ -446,7 +478,7 @@ func (s *Service) DeleteInstance(ctx context.Context, in DeleteInput) (d.Deploym
 	}
 	// Remove the route first, then workloads. Never delete shared Gateway or LB.
 	ordered := append([]d.Resource{}, dep.Resources...)
-	for _, kind := range []string{"TCPRoute", "StatefulSet", "Service", "ConfigMap"} {
+	for _, kind := range []string{"TCPRoute", "Deployment", "StatefulSet", "Service", "ConfigMap"} {
 		for _, r := range ordered {
 			if r.Kind == kind && r.UID != "" {
 				if err = s.cluster.Delete(ctx, r); err != nil {
@@ -489,7 +521,7 @@ func (s *Service) DeleteInstance(ctx context.Context, in DeleteInput) (d.Deploym
 	return dep, err
 }
 
-// VerifyAccess performs read-only Redis AUTH/PING or PostgreSQL SELECT 1 from
+// VerifyAccess performs the selected software's fixed read-only protocol check from
 // this server. It never claims that the user's own network can reach the LB.
 func (s *Service) VerifyAccess(ctx context.Context, in DeploymentInput) (d.AccessReport, error) {
 	if err := s.policy(ctx, "access.verify", false, in); err != nil {

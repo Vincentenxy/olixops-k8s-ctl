@@ -29,6 +29,9 @@ mcp:
   write-enabled: true
 # Embedded SQLite: use a persistent, writable directory. No separate DB server.
 catalog:
+  default-owner: poc
+  default-storage-class: local-path
+  sandbox-runtime-class: ""
   enabled: true
   database-path: ./data/olixops.db
   cluster: configured

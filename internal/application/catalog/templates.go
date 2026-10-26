@@ -148,14 +148,47 @@ type TemplateInput struct {
 }
 
 func templateID(software string, version int) string { return fmt.Sprintf("%s:%d", software, version) }
-func softwareValid(s string) bool                    { return s == "redis" || s == "postgres" }
-func backend(s string) int {
-	if s == "redis" {
-		return 6379
-	}
-	return 5432
-}
+func softwareValid(s string) bool                    { _, ok := d.Profile(s); return ok }
+func backend(s string) int                           { profile, _ := d.Profile(s); return profile.BackendPort }
 func schema(sw string) string {
+	profile, _ := d.Profile(sw)
+	properties := map[string]any{}
+	for _, key := range []string{"image", "cpu", "memory"} {
+		properties[key] = map[string]any{"type": "string"}
+	}
+	required := []string{"image", "cpu", "memory"}
+	if profile.Persistent {
+		for _, key := range []string{"storage", "storageClass"} {
+			properties[key] = map[string]any{"type": "string"}
+		}
+		required = append(required, "storage", "storageClass")
+	}
+	if supportsSecret(sw) {
+		for _, key := range []string{"secretName", "secretKey"} {
+			properties[key] = map[string]any{"type": "string"}
+		}
+	}
+	if sw == "postgres" || sw == "mysql" || sw == "mongodb" {
+		properties["database"] = map[string]any{"type": "string"}
+		properties["username"] = map[string]any{"type": "string"}
+		if sw != "mongodb" {
+			required = append(required, "database", "username")
+		}
+	}
+	if sw == "nginx" {
+		properties["content"] = map[string]any{"type": "string", "maxLength": 262144}
+	}
+	if sw == "sandbox" {
+		properties["runtimeClassName"] = map[string]any{"type": "string"}
+		properties["ttlSeconds"] = map[string]any{"type": "integer", "minimum": 60, "maximum": 86400}
+	}
+	b, _ := json.Marshal(map[string]any{"type": "object", "additionalProperties": false, "properties": properties, "required": required})
+	return string(b)
+}
+func supportsSecret(sw string) bool {
+	return sw == "redis" || sw == "postgres" || sw == "mysql" || sw == "mongodb"
+}
+func legacySchema(sw string) string {
 	p := map[string]any{}
 	for _, key := range []string{"image", "cpu", "memory", "storage", "storageClass", "secretName", "secretKey", "database", "username"} {
 		p[key] = map[string]any{"type": "string"}
@@ -170,18 +203,65 @@ func schema(sw string) string {
 func seeds() []d.Template {
 	now := time.Now().UTC()
 	var out []d.Template
+	// Preserve historical definitions; saved template versions are immutable.
 	for _, sw := range []string{"redis", "postgres"} {
-		p := d.Parameters{CPU: "250m", Memory: "256Mi", Storage: "1Gi", SecretKey: "password"}
-		if sw == "redis" {
-			p.Image = "redis:7.4.2"
-		} else {
+		p := d.Parameters{CPU: "250m", Memory: "256Mi", Storage: "1Gi", SecretKey: "password", Image: "redis:7.4.2"}
+		if sw == "postgres" {
 			p.Image = "postgres:17.4"
 			p.Memory = "512Mi"
 			p.Storage = "5Gi"
 			p.Database = "app"
 			p.Username = "app"
 		}
-		out = append(out, d.Template{ID: templateID(sw, 1), Software: sw, Version: 1, Defaults: p, ManifestTemplate: baseTemplate, ParameterSchema: schema(sw), CreatedAt: now})
+		out = append(out, d.Template{ID: templateID(sw, 1), Software: sw, Version: 1, Defaults: p, ManifestTemplate: baseTemplate, ParameterSchema: legacySchema(sw), CreatedAt: now})
+	}
+	for _, profile := range d.Profiles() {
+		sw := profile.Software
+		p := d.Parameters{CPU: "250m", Memory: "512Mi", Storage: "5Gi"}
+		version := 1
+		switch sw {
+		case "redis":
+			version = 2
+			p.Image = "redis:7.4.2"
+			p.Memory = "256Mi"
+			p.Storage = "1Gi"
+			p.SecretKey = "password"
+		case "postgres":
+			version = 2
+			p.Image = "postgres:17.4"
+			p.Database = "app"
+			p.Username = "app"
+			p.SecretKey = "password"
+		case "mysql":
+			p.Image = "mysql:8.4.4"
+			p.Memory = "1Gi"
+			p.Database = "app"
+			p.Username = "root"
+			p.SecretKey = "password"
+		case "mongodb":
+			p.Image = "mongo:8.0.8"
+			p.Username = "root"
+			p.Database = "app"
+			p.SecretKey = "password"
+		case "milvus":
+			p.Image = "milvusdb/milvus:v2.5.11"
+			p.CPU = "2"
+			p.Memory = "4Gi"
+			p.Storage = "10Gi"
+		case "nginx":
+			p.Image = "nginx:1.28-alpine"
+			p.CPU = "100m"
+			p.Memory = "128Mi"
+			p.Storage = ""
+			p.Content = "<!doctype html><html><head><title>Nginx</title></head><body><h1>Nginx is ready</h1></body></html>"
+		case "sandbox":
+			p.Image = "quay.io/jupyter/base-notebook:2025-03-14"
+			p.CPU = "500m"
+			p.Memory = "1Gi"
+			p.Storage = ""
+			p.TTLSeconds = 7200
+		}
+		out = append(out, d.Template{ID: templateID(sw, version), Software: sw, Version: version, Defaults: p, ManifestTemplate: standardTemplate, ParameterSchema: schema(sw), CreatedAt: now})
 	}
 	return out
 }
@@ -201,6 +281,7 @@ func (s *Service) Templates(ctx context.Context) ([]d.Template, error) {
 }
 func (s *Service) Template(ctx context.Context, in TemplateInput) (d.Template, error) {
 	var out d.Template
+	in.Software = d.NormalizeSoftware(in.Software)
 	if err := s.policy(ctx, "template.get", false, in); err != nil {
 		return out, err
 	}
@@ -216,23 +297,21 @@ func (s *Service) Template(ctx context.Context, in TemplateInput) (d.Template, e
 }
 func (s *Service) SaveTemplate(ctx context.Context, in SaveTemplateInput) (d.Template, error) {
 	var out d.Template
+	in.Software = d.NormalizeSoftware(in.Software)
 	if err := s.policy(ctx, "template.save", true, in); err != nil {
 		return out, err
 	}
 	if !softwareValid(in.Software) || in.Version < 1 || len(in.ManifestTemplate) > 1<<20 {
-		return out, d.Fail("INVALID_PARAMETER", "supported software is redis or postgres; version must be positive; template limit is 1 MiB")
+		return out, d.Fail("INVALID_PARAMETER", "unsupported software, non-positive version, or template exceeds 1 MiB")
 	}
 	if in.ManifestTemplate == "" {
-		in.ManifestTemplate = baseTemplate
+		in.ManifestTemplate = standardTemplate
 	}
 	out = d.Template{ID: templateID(in.Software, in.Version), Software: in.Software, Version: in.Version, Defaults: in.Defaults, ParameterSchema: schema(in.Software), ManifestTemplate: in.ManifestTemplate, CreatedAt: time.Now().UTC()}
 	// Validate even templates whose required installation parameters have no default.
 	sample := out.Defaults
 	if sample.StorageClass == "" {
 		sample.StorageClass = "validation-only"
-	}
-	if sample.SecretName == "" {
-		sample.SecretName = "validation-only"
 	}
 	sample = merge(seedsFor(in.Software).Defaults, sample)
 	if err := validateParams(in.Software, sample); err != nil {
@@ -259,12 +338,14 @@ func (s *Service) SaveTemplate(ctx context.Context, in SaveTemplateInput) (d.Tem
 	return out, err
 }
 func seedsFor(sw string) d.Template {
+	sw = d.NormalizeSoftware(sw)
+	var current d.Template
 	for _, v := range seeds() {
-		if v.Software == sw {
-			return v
+		if v.Software == sw && v.Version > current.Version {
+			current = v
 		}
 	}
-	return d.Template{}
+	return current
 }
 func merge(base, over d.Parameters) d.Parameters {
 	if over.Image != "" {
@@ -294,45 +375,125 @@ func merge(base, over d.Parameters) d.Parameters {
 	if over.Username != "" {
 		base.Username = over.Username
 	}
+	if over.Content != "" {
+		base.Content = over.Content
+	}
+	if over.RuntimeClassName != "" {
+		base.RuntimeClassName = over.RuntimeClassName
+	}
+	if over.TTLSeconds != 0 {
+		base.TTLSeconds = over.TTLSeconds
+	}
 	return base
 }
 func validateParams(sw string, p d.Parameters) error {
-	for key, val := range map[string]string{"image": p.Image, "cpu": p.CPU, "memory": p.Memory, "storage": p.Storage, "storageClass": p.StorageClass, "secretName": p.SecretName, "secretKey": p.SecretKey} {
+	sw = d.NormalizeSoftware(sw)
+	profile, ok := d.Profile(sw)
+	if !ok {
+		return d.Fail("INVALID_PARAMETER", "unsupported software")
+	}
+	required := map[string]string{"image": p.Image, "cpu": p.CPU, "memory": p.Memory}
+	quantities := map[string]string{"cpu": p.CPU, "memory": p.Memory}
+	if profile.Persistent {
+		required["storage"] = p.Storage
+		required["storageClass"] = p.StorageClass
+		quantities["storage"] = p.Storage
+	}
+	if p.SecretName != "" {
+		if !supportsSecret(sw) {
+			return d.Fail("INVALID_PARAMETER", "this software does not accept a Secret reference")
+		}
+		required["secretKey"] = p.SecretKey
+		if len(validation.IsDNS1123Subdomain(p.SecretName)) > 0 || len(validation.IsConfigMapKey(p.SecretKey)) > 0 {
+			return d.Fail("INVALID_PARAMETER", "invalid Secret reference")
+		}
+	}
+	for key, val := range required {
 		if val == "" {
 			return d.Fail("MISSING_PARAMETER", "required parameter: "+key)
 		}
 	}
-	for key, val := range map[string]string{"cpu": p.CPU, "memory": p.Memory, "storage": p.Storage} {
+	for key, val := range quantities {
 		q, err := resource.ParseQuantity(val)
 		if err != nil || q.Sign() <= 0 {
 			return d.Fail("INVALID_PARAMETER", key+" must be a positive Kubernetes quantity")
 		}
 	}
-	if len(validation.IsDNS1123Subdomain(p.StorageClass)) > 0 || len(validation.IsDNS1123Subdomain(p.SecretName)) > 0 || len(validation.IsConfigMapKey(p.SecretKey)) > 0 {
-		return d.Fail("INVALID_PARAMETER", "invalid StorageClass or Secret reference")
+	if profile.Persistent && len(validation.IsDNS1123Subdomain(p.StorageClass)) > 0 {
+		return d.Fail("INVALID_PARAMETER", "invalid StorageClass")
 	}
-	if len(p.Image) > 256 || strings.ContainsAny(p.Image, " \t\n\r") || (!strings.Contains(p.Image, ":") && !strings.Contains(p.Image, "@sha256:")) {
+	if !explicitImage(p.Image) {
 		return d.Fail("INVALID_PARAMETER", "image must include an explicit tag or digest")
 	}
-	if sw == "postgres" {
+	if sw == "postgres" || sw == "mysql" || (sw == "mongodb" && p.SecretName != "") {
 		r := regexp.MustCompile(`^[a-zA-Z][a-zA-Z0-9_]{0,62}$`)
-		if !r.MatchString(p.Database) || !r.MatchString(p.Username) {
-			return d.Fail("INVALID_PARAMETER", "PostgreSQL database and username must be simple identifiers")
+		if !r.MatchString(p.Username) || (sw != "mongodb" && !r.MatchString(p.Database)) {
+			return d.Fail("INVALID_PARAMETER", "database and username must be simple identifiers")
 		}
+		if sw == "mysql" && len(p.Username) > 32 {
+			return d.Fail("INVALID_PARAMETER", "MySQL username cannot exceed 32 characters")
+		}
+		if sw == "mysql" && p.SecretName == "" && p.Username != "root" {
+			return d.Fail("INVALID_PARAMETER", "MySQL without a Secret uses username root")
+		}
+	}
+	if sw != "nginx" && p.Content != "" {
+		return d.Fail("INVALID_PARAMETER", "content is only supported by nginx")
+	}
+	if len(p.Content) > 256<<10 {
+		return d.Fail("INVALID_PARAMETER", "content exceeds 256 KiB")
+	}
+	if sw != "sandbox" && (p.RuntimeClassName != "" || p.TTLSeconds != 0) {
+		return d.Fail("INVALID_PARAMETER", "runtimeClassName and ttlSeconds are only supported by sandbox")
+	}
+	if p.RuntimeClassName != "" && len(validation.IsDNS1123Subdomain(p.RuntimeClassName)) > 0 {
+		return d.Fail("INVALID_PARAMETER", "invalid RuntimeClass name")
+	}
+	if sw == "sandbox" && (p.TTLSeconds < 60 || p.TTLSeconds > 86400) {
+		return d.Fail("INVALID_PARAMETER", "sandbox ttlSeconds must be between 60 and 86400")
 	}
 	return nil
 }
+func explicitImage(image string) bool {
+	if len(image) > 256 || strings.ContainsAny(image, " \t\n\r") {
+		return false
+	}
+	if strings.Contains(image, "@") {
+		parts := strings.Split(image, "@sha256:")
+		if len(parts) != 2 || parts[0] == "" || len(parts[1]) != 64 {
+			return false
+		}
+		for _, ch := range parts[1] {
+			if !strings.ContainsRune("0123456789abcdef", ch) {
+				return false
+			}
+		}
+		return true
+	}
+	last := image[strings.LastIndex(image, "/")+1:]
+	parts := strings.Split(last, ":")
+	return len(parts) == 2 && parts[0] != "" && regexp.MustCompile(`^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$`).MatchString(parts[1])
+}
 func render(t d.Template, i d.Instance, p d.Parameters, rev int) (string, error) {
+	if t.ManifestTemplate == baseTemplate && p.SecretName == "" {
+		return "", d.Fail("MISSING_PARAMETER", "legacy template requires secretName; use the current template for a deployment without authentication")
+	}
 	tpl, err := template.New("manifest").Option("missingkey=error").Funcs(template.FuncMap{"q": func(v string) string { b, _ := json.Marshal(v); return string(b) }}).Parse(t.ManifestTemplate)
 	if err != nil {
 		return "", d.Fail("INVALID_TEMPLATE", "cannot parse manifest template")
+	}
+	profile, ok := d.Profile(i.Software)
+	if !ok {
+		return "", d.Fail("INVALID_TEMPLATE", "unsupported software")
 	}
 	var b bytes.Buffer
 	err = tpl.Execute(&b, struct {
 		Name, Namespace, Software, InstanceID string
 		BackendPort                           int
 		Parameters                            d.Parameters
-	}{i.ResourceName, i.Namespace, i.Software, i.ID, backend(i.Software), p})
+		Profile                               d.SoftwareProfile
+		DataPath                              string
+	}{i.ResourceName, i.Namespace, profile.Software, i.ID, profile.BackendPort, p, profile, dataPath(profile.Software)})
 	if err != nil || b.Len() > 2<<20 {
 		return "", d.Fail("INVALID_TEMPLATE", "cannot render template or output exceeds 2 MiB")
 	}
@@ -350,8 +511,9 @@ func render(t d.Template, i d.Instance, p d.Parameters, rev int) (string, error)
 			continue
 		}
 		u := &unstructured.Unstructured{Object: obj}
-		if u.GetKind() == "TCPRoute" || u.GetNamespace() != i.Namespace {
-			return "", d.Fail("INVALID_TEMPLATE", "template resources must declare the instance namespace; TCPRoute is generated separately")
+		allowed := map[string]string{"StatefulSet": "apps/v1", "Deployment": "apps/v1", "Service": "v1", "PersistentVolumeClaim": "v1", "ConfigMap": "v1"}
+		if allowed[u.GetKind()] != u.GetAPIVersion() || u.GetNamespace() != i.Namespace {
+			return "", d.Fail("INVALID_TEMPLATE", "template may only contain allowed workload, Service, PVC and ConfigMap resources in the instance namespace; TCPRoute is generated separately")
 		}
 	}
 	return stamp(b.String(), i.ID, rev)

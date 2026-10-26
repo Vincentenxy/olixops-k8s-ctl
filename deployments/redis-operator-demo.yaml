@@ -1,0 +1,66 @@
+# Test instance: requires the existing Opstree Redis Operator and namespace.
+# Create redis-credentials/password separately; never put a real password here.
+# Offline test: this image is already cached on k8s-poc-worker4.
+# Never prevents image pulls; update the node selector if the cached node changes.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: redis-operator-config
+  namespace: wx-test-ns-002
+data:
+  redis-additional.conf: |
+    appendonly yes
+    appendfsync everysec
+---
+apiVersion: redis.redis.opstreelabs.in/v1beta2
+kind: Redis
+metadata:
+  name: redis
+  namespace: wx-test-ns-002
+spec:
+  kubernetesConfig:
+    image: quay.io/opstree/redis:v7.4.6
+    imagePullPolicy: Never
+    redisSecret:
+      name: redis-credentials
+      key: password
+    resources:
+      requests:
+        cpu: 250m
+        memory: 256Mi
+      limits:
+        cpu: 250m
+        memory: 256Mi
+  nodeSelector:
+    kubernetes.io/hostname: k8s-poc-worker4
+  redisConfig:
+    additionalRedisConfig: redis-operator-config
+  storage:
+    keepAfterDelete: true
+    volumeClaimTemplate:
+      spec:
+        accessModes:
+          - ReadWriteOnce
+        storageClassName: local-path
+        resources:
+          requests:
+            storage: 1Gi
+---
+# The shared Service/Gateway already expose port 30109. This route adds no LB.
+# Check/sync the port ledger before applying: this port must be available.
+apiVersion: gateway.networking.k8s.io/v1alpha2
+kind: TCPRoute
+metadata:
+  name: redis-30109
+  namespace: wx-test-ns-002
+spec:
+  parentRefs:
+    - name: higress-tcp-gateway
+      namespace: higress-system
+      sectionName: olixops-tcp-30109
+      port: 30109
+  rules:
+    - backendRefs:
+        - name: redis
+          port: 6379
+          weight: 1

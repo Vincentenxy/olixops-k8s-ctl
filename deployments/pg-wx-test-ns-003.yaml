@@ -1,0 +1,50 @@
+# PoC PostgreSQL managed by the cluster's existing CloudNativePG operator.
+# The selected node already caches both the operator 1.24.4 and PG 17.5 images.
+# The Higress listener/Service port olixops-tcp-30198 already exists.
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: pg-30198
+  namespace: wx-test-ns-003
+spec:
+  instances: 1
+  imageName: ghcr.io/cloudnative-pg/postgresql:17.5
+  imagePullPolicy: IfNotPresent
+  enableSuperuserAccess: false
+  affinity:
+    nodeSelector:
+      kubernetes.io/hostname: k8s-poc-worker2
+  bootstrap:
+    initdb:
+      database: app
+      owner: app
+  storage:
+    storageClass: local-path
+    size: 5Gi
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      cpu: 250m
+      memory: 512Mi
+  postgresql:
+    pg_hba:
+      - host app app 0.0.0.0/0 trust
+      - host app app ::/0 trust
+---
+apiVersion: gateway.networking.k8s.io/v1alpha2
+kind: TCPRoute
+metadata:
+  name: pg-30198-route
+  namespace: wx-test-ns-003
+spec:
+  parentRefs:
+    - name: higress-tcp-gateway
+      namespace: higress-system
+      sectionName: olixops-tcp-30198
+      port: 30198
+  rules:
+    - backendRefs:
+        - name: pg-30198-rw
+          port: 5432

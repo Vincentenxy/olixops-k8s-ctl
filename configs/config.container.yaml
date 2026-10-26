@@ -1,0 +1,45 @@
+# Container defaults, mounted through the deployment ConfigMap.
+# The API key is read from a mounted Secret file at startup.
+server:
+  host: 0.0.0.0
+  port: 8091
+  mode: release
+
+app:
+  name: olixops-k8s-ctl
+  version: 0.2.0
+
+kubernetes:
+  in-cluster: true
+  kubeconfig:
+    source: file
+    path: ""
+    reference: ""
+    context: ""
+  write-enabled: true
+  allowed-namespaces: []
+  command-timeout-seconds: 120
+  kubectl: kubectl
+  helm: helm
+
+control:
+  api-key: ""
+  api-key-file: /app/secrets/control/api-key
+
+mcp:
+  enabled: true
+  write-enabled: true
+
+catalog:
+  default-owner: poc
+  default-storage-class: local-path
+  sandbox-runtime-class: ""
+  enabled: true
+  database-path: /data/olixops.db
+  cluster: configured
+  gateway-id: higress
+  gateway-namespace: higress-system
+  gateway-service: higress-gateway
+  gateway-name: higress-tcp-gateway
+  port-start: 30000
+  port-end: 30200

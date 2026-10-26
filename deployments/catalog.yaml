@@ -1,11 +1,80 @@
-# Prerequisites: namespace olixops, preconfigured ServiceAccount/RBAC named
-# olixops-k8s-ctl and Secret olixops-control with key api-key. Not auto-applied.
+# Before applying: push the image and set its registry URL; prepare Secret
+# olixops-control/api-key and RBAC bindings for the ServiceAccount below.
+# After creating the namespace, run: bash scripts/prepare-control-secret.sh
+# Review/apply deployments/rbac.yaml for the intended business namespace.
+# The Ingress host follows the existing cluster domain; change it as needed.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: olixops
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: olixops-k8s-ctl
+  namespace: olixops
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: olixops-k8s-ctl-config
+  namespace: olixops
+data:
+  config.yaml: |
+    # Container defaults, mounted through the deployment ConfigMap.
+    # The API key is read from a mounted Secret file at startup.
+    server:
+      host: 0.0.0.0
+      port: 8091
+      mode: release
+
+    app:
+      name: olixops-k8s-ctl
+      version: 0.2.0
+
+    kubernetes:
+      in-cluster: true
+      kubeconfig:
+        source: file
+        path: ""
+        reference: ""
+        context: ""
+      write-enabled: true
+      allowed-namespaces: []
+      command-timeout-seconds: 120
+      kubectl: kubectl
+      helm: helm
+
+    control:
+      api-key: ""
+      api-key-file: /app/secrets/control/api-key
+
+    mcp:
+      enabled: true
+      write-enabled: true
+
+    catalog:
+      default-owner: poc
+      default-storage-class: local-path
+      sandbox-runtime-class: ""
+      enabled: true
+      database-path: /data/olixops.db
+      cluster: configured
+      gateway-id: higress
+      gateway-namespace: higress-system
+      gateway-service: higress-gateway
+      gateway-name: higress-tcp-gateway
+      port-start: 30000
+      port-end: 30200
+---
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
   name: olixops-catalog
   namespace: olixops
 spec:
+  # Uses the default StorageClass (currently local-path in the target cluster).
+  # storageClassName: local-path
   accessModes: [ReadWriteOnce]
   resources:
     requests:
@@ -36,35 +105,57 @@ spec:
         fsGroup: 10001
       containers:
         - name: controller
-          image: olixops-k8s-ctl:catalog-dev
+          image: harbor.gtjaqh.net/lucy-dev/k8s-ctl:0.0.1-alpha.9
           imagePullPolicy: IfNotPresent
-          env:
-            - name: SERVER_HOST
-              value: 0.0.0.0
-            - name: KUBERNETES_IN_CLUSTER
-              value: "true"
-            - name: CONTROL_API_KEY
-              valueFrom:
-                secretKeyRef:
-                  name: olixops-control
-                  key: api-key
-            - name: CATALOG_DATABASE_PATH
-              value: /data/olixops.db
           ports:
             - name: http
               containerPort: 8091
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: "1"
+              memory: 512Mi
+          startupProbe:
+            httpGet:
+              path: /api/v1/pub/health
+              port: http
+            periodSeconds: 2
+            timeoutSeconds: 2
+            failureThreshold: 60
           readinessProbe:
             httpGet:
               path: /api/v1/pub/ready
               port: http
+            periodSeconds: 5
+            timeoutSeconds: 2
           livenessProbe:
             httpGet:
               path: /api/v1/pub/health
               port: http
+            periodSeconds: 10
+            timeoutSeconds: 2
           volumeMounts:
+            - name: config
+              mountPath: /app/configs
+              readOnly: true
+            - name: control-key
+              mountPath: /app/secrets/control
+              readOnly: true
             - name: catalog
               mountPath: /data
       volumes:
+        - name: config
+          configMap:
+            name: olixops-k8s-ctl-config
+        - name: control-key
+          secret:
+            secretName: olixops-control
+            defaultMode: 0440
+            items:
+              - key: api-key
+                path: api-key
         - name: catalog
           persistentVolumeClaim:
             claimName: olixops-catalog
@@ -81,3 +172,33 @@ spec:
     - name: http
       port: 8091
       targetPort: http
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: olixops-k8s-ctl
+  namespace: olixops
+  annotations:
+    higress.io/use-regex: "true"
+    higress.io/rewrite-target: /$2
+    # Longer than the application's 120-second write timeout.
+    higress.io/timeout: "180"
+    # Do not automatically replay control requests at the gateway.
+    higress.io/proxy-next-upstream-tries: "0"
+spec:
+  ingressClassName: higress
+  # If TLS is not already provided for this host, configure a certificate:
+  # tls:
+  #   - hosts: [efficient-lab.qiuer.net]
+  #     secretName: olixops-k8s-ctl-tls
+  rules:
+    - host: efficient-lab.qiuer.net
+      http:
+        paths:
+          - path: /k8sctl(/|$)(.*)
+            pathType: ImplementationSpecific
+            backend:
+              service:
+                name: olixops-k8s-ctl
+                port:
+                  name: http

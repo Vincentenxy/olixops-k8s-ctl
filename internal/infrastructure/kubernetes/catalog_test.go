@@ -89,9 +89,10 @@ func TestCatalogDeletionUsesPinnedUIDAndForbiddenKind(t *testing.T) {
 	c, _, _, _ := fixture()
 	ctx := context.Background()
 	uid := types.UID("pinned")
+	deletePath := "/api/v1/namespaces/demo/configmaps/config"
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		require.Equal(t, http.MethodDelete, r.Method)
-		require.Equal(t, "/api/v1/namespaces/demo/configmaps/config", r.URL.Path)
+		require.Equal(t, deletePath, r.URL.Path)
 		var options metav1.DeleteOptions
 		require.NoError(t, json.NewDecoder(r.Body).Decode(&options))
 		require.NotNil(t, options.Preconditions)
@@ -104,6 +105,9 @@ func TestCatalogDeletionUsesPinnedUIDAndForbiddenKind(t *testing.T) {
 	require.NoError(t, err)
 	c.dynamic = dyn
 	require.NoError(t, c.CatalogDelete(ctx, d.Resource{Kind: "ConfigMap", Namespace: "demo", Name: "config", UID: string(uid)}))
+	c.discovery.(*fake.FakeDiscovery).Resources = append(c.discovery.(*fake.FakeDiscovery).Resources, &metav1.APIResourceList{GroupVersion: "apps/v1", APIResources: []metav1.APIResource{{Name: "deployments", Kind: "Deployment", Namespaced: true}}})
+	deletePath = "/apis/apps/v1/namespaces/demo/deployments/web"
+	require.NoError(t, c.CatalogDelete(ctx, d.Resource{Kind: "Deployment", Namespace: "demo", Name: "web", UID: string(uid)}))
 	require.Error(t, c.CatalogDelete(ctx, d.Resource{Kind: "Gateway", Namespace: "higress-system", Name: "shared", UID: "x"}))
 	require.Error(t, c.CatalogDelete(ctx, d.Resource{Kind: "ConfigMap", Namespace: "demo", Name: "config"}))
 }

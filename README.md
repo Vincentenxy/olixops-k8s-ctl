@@ -22,6 +22,8 @@
 
 标准服务从配置保存到部署、回收的源码路径与完整参数见 [标准服务目录文档](docs/standard-services.md)。MCP 的完整参数、限制和调用示例见 [docs/mcp-development.md](docs/mcp-development.md)；权限控制的后续设计见 [docs/mcp-authorization-design.md](docs/mcp-authorization-design.md)。
 
+PoC 使用方的服务地址、接入方式、50 个工具清单（本次代码版本）与调用示例见 [MCP 使用指南](docs/mcp-user-guide.md)。
+
 ## 架构
 
 项目采用 `domain → application → interfaces/infrastructure` 的分层方式，外部 Kubernetes API 和 CLI 都通过适配器隔离：
@@ -63,9 +65,35 @@ flowchart TD
 - 原始 YAML 读取与标准配置预览按原文返回；历史结构化资源接口沿用原有过滤。CLI stderr、连接串和凭据不写日志。目录业务错误返回可识别 reason，未分类依赖错误沿用通用提示。
 - 目录初始化只写本地 SQLite；端口分配前完整核对 Higress，部署绑定固定修订/YAML/摘要；中断保留预留记录。SQLite 单副本，配置保存不执行集群部署。
 
+## 打包部署
+
+在项目根目录执行；首次推送或登录过期时先登录 Harbor：
+
+```bash
+docker login harbor.gtjaqh.net
+
+docker buildx build \
+  --platform linux/amd64 \
+  --build-arg BASE_IMAGE_REGISTRY=m.daocloud.io/docker.io \
+  --build-arg GOPROXY=https://goproxy.cn,direct \
+  -t harbor.gtjaqh.net/lucy-dev/k8s-ctl:0.0.1-alpha.8 \
+  --push \
+  .
+```
+
+`BASE_IMAGE_REGISTRY` 指定基础镜像仓库前缀，`GOPROXY` 指定构建阶段的 Go 模块代理。`--push` 构建后直接推送到 Harbor。
+
 ## 快速启动
 
 开发环境需要 Go 1.26、能够访问目标集群的 kubeconfig，以及执行写操作时可用的 `kubectl` 和 Helm 3。client-go 查询不依赖 kubectl/Helm；Dockerfile 已加入这两个 CLI 的安装步骤，并为 SQLite 创建非 root 可写的 `/data`；完整容器构建还需基础镜像仓库网络可用。
+
+容器构建、镜像推送和 Kubernetes 部署步骤见 [容器部署文档](docs/container-deployment.md)。Dockerfile 使用独立的 `configs/config.container.yaml`，默认监听 `0.0.0.0:8091`、使用 InCluster Provider；集群部署通过 ConfigMap 挂载配置文件，API key 从 Secret 挂载文件读取，不需要配置运行时环境变量。支持通过 buildx 构建 Linux amd64/arm64 镜像，SQLite 仍使用单副本 PVC。
+
+[部署清单](deployments/catalog.yaml) 包含 Namespace、ServiceAccount、ConfigMap、PVC、Deployment、Service 和 Higress Ingress。外部访问前缀为 `/k8sctl`，Higress 去掉此前缀后转发到应用；例如外部 MCP 路径为 `/k8sctl/api/v1/pub/mcp`。部署域名为 `efficient-lab.qiuer.net`，部署前核对镜像地址、API key Secret、ServiceAccount 的 RBAC 和域名/TLS。
+
+集群内部署使用 Pod 的 ServiceAccount 连接本集群，无需挂载本机 kubeconfig。[RBAC 基础配置](deployments/rbac.yaml) 提供 `wx-test-ns-001`、`wx-test-ns-002` 业务资源权限、集群必要查询权限、Namespace 创建权限和指定 Higress 入口的更新权限，需单独核对并应用；新 Namespace 的业务资源操作仍需额外 RoleBinding，Namespace 更新/删除及 Helm release Secret 写入未默认授予。步骤和边界见 [Kubernetes 权限说明](docs/kubernetes-rbac.md)。
+
+Redis Operator 的真实集群测试清单见 [redis-operator-demo.yaml](deployments/redis-operator-demo.yaml)，部署记录与使用边界见 [Redis Operator 测试说明](docs/redis-operator-demo.md)。该测试复用集群已有 Opstree Operator 和节点缓存镜像，使用 `Never` 禁止拉取，经 Higress `30109` 提供服务；当前 SQLite 标准模板仍使用普通 StatefulSet，尚未接入 Operator 生命周期。
 
 ```bash
 go run ./cmd
@@ -101,7 +129,9 @@ catalog:
   port-end: 30200
 ```
 
-常用环境变量会覆盖同名配置键：
+集群部署直接修改 `deployments/catalog.yaml` 中 ConfigMap 的 `data.config.yaml`，监听地址、MCP/写开关、Higress 和端口池均在该文件内。API key 通过 `control.api-key-file: /app/secrets/control/api-key` 引用 Secret 挂载文件。修改 ConfigMap 或 Secret 后需要重启 Deployment；应用不会热加载。镜像默认配置位于 `configs/config.container.yaml`。
+
+环境变量覆盖能力仍兼容原有本地启动方式，集群部署不依赖它：
 
 | 环境变量 | 作用 |
 | --- | --- |
@@ -125,7 +155,7 @@ KUBERNETES_WRITE_ENABLED=true \
 go run ./cmd
 ```
 
-如果把 `SERVER_HOST` 改成非回环地址，必须设置 `CONTROL_API_KEY`，并在 REST 请求中发送 `X-Olixops-Control-Key`。这个 key 保护 `/api/v1/cluster/...`、`/templates/...`、`/services/...`、`/ports/...`，**不保护公开 MCP 路由**。
+如果监听非回环地址，必须通过 `control.api-key-file` 或原有 `control.api-key` 配置有效 key（两者只选一种），并在 REST 请求中发送 `X-Olixops-Control-Key`。这个 key 保护 `/api/v1/cluster/...`、`/templates/...`、`/services/...`、`/ports/...`，**不保护公开 MCP 路由**。
 
 ## REST 接口
 
@@ -176,7 +206,7 @@ http://127.0.0.1:8091/api/v1/pub/mcp
 - `create_namespace`、`delete_namespace`、`update_namespace_metadata`
 - `update_configmap`
 
-目录开启时另有 11 个读工具和 8 个写工具，完整开启共 **48 个工具（27 读、21 写）**。新增模板/配置/端口与标准部署工具的清单、参数和状态机见 [标准服务目录](docs/standard-services.md)。
+目录开启时另有 12 个读工具和 9 个写工具，完整开启共 **50 个工具（28 读、22 写）**。新增模板/配置/端口与标准部署工具的清单、参数和状态机见 [标准服务目录](docs/standard-services.md)。
 
 `MCP_WRITE_ENABLED=true` 注册写工具；集群变更还需 `KUBERNETES_WRITE_ENABLED=true`。模板/配置/台账数据库写入不依赖 Kubernetes 写开关。工具开关、固定资源白名单、Namespace 范围和参数校验属于功能边界，不等于调用者授权。当前 `Authorizer` 默认允许调用，写工具只能用于受控测试环境。日志、事件、资源 status 和 Pod 日志可能含有业务敏感信息。
 
@@ -257,10 +287,21 @@ git diff --check
 
 ## 文档索引
 
-- [标准服务目录](docs/standard-services.md)：已实现的 SQLite 配置、独立 Redis/PG、201 个端口、HTTP/MCP 参数与恢复流程。
+- [标准服务目录](docs/standard-services.md)：已实现的 SQLite 配置、七类独立服务、201 个端口、HTTP/MCP 参数与恢复流程。
 - [标准服务开发计划](docs/standard-service-development-plan.md)：原始八阶段计划及交付验收状态。
 - [MCP 开发文档](docs/mcp-development.md)：原有 29 个工具与新增 19 个标准服务工具的清单、限制和测试覆盖。
 - [MCP / REST 权限控制设计](docs/mcp-authorization-design.md)：认证、授权、审批、审计和 Kubernetes RBAC 的后续方案。
 - [配置文件](configs/config.yaml)：本地默认配置。
 - [MCP 集成测试](tests/mcp_test.go)：MCP 协议和工具发现测试。
 - [操作测试](tests/operations_test.go)：资源操作、CLI、日志、Helm、边界和权限扩展点测试。
+
+## 常用服务一句话部署
+
+首批支持 Redis、PostgreSQL（pg）、MySQL、MongoDB（mongo）、Milvus、Nginx、Python JupyterLab 沙箱。
+通过 MCP 的 `list_standard_services` 发现推荐版本与环境默认值，再调用 `deploy_standard_service`：
+
+```json
+{"software":"mongodb","namespace":"wx-test-ns-001","requestId":"mongo-demo-20261026-01"}
+```
+
+用户可以说“在 wx-test-ns-001 部署一个 Milvus”或“在 wx-test-ns-002 开一个保留一小时的 Python 沙箱”。Namespace 必须由用户指定；缺少时客户端提示“请指定部署目标 Namespace”，服务端返回 MISSING_NAMESPACE 且不保存/分配端口。指定的 Namespace 不存在时，实际部署自动创建；创建受白名单、写开关和现有权限约束，不自动绑定 RBAC。客户端根据工具 Schema 调用，生成唯一 requestId，失败重试沿用同一值与参数。服务端使用默认 owner/StorageClass/资源规格，自动分配可用 Higress TCP 端口，返回实例、部署与访问地址。完整参数、首批规格、沙箱回收、重试与验收边界见 [常用服务使用说明](docs/standard-service-quickstart.md)。本次代码新增两个工具；线上原 48 工具实例需升级镜像后才可发现新入口。

@@ -1,6 +1,6 @@
 # 标准服务目录、配置和端口台账
 
-更新：2026-10-26。已实现代码和模拟集群验收，尚未向真实集群创建实例或修改 Higress。只需要部署 k8s-ctl；SQLite 是进程内数据库，无需另部署数据库服务，olixops-agent 本轮无需变更。
+更新：2026-10-26。已实现代码和模拟集群验收，并在真实集群验证 Namespace 创建、标准 Redis 清单部署/删除、Higress 端口暴露与台账同步。普通 Redis 因镜像不可达未启动，按要求改为已有 Redis Operator 管理的实例；该实例已通过共享 LB 的密码认证与 PING 验证，详见 [Operator 测试记录](redis-operator-demo.md)。只需要部署 k8s-ctl；SQLite 是进程内数据库，无需另部署数据库服务，olixops-agent 本轮无需变更。
 
 ## 模块与阅读路径
 
@@ -35,7 +35,7 @@ SQLite 使用六张业务表：`service_templates`、`service_instances`、`serv
 
 ## 配置与持久化
 
-`configs/config.yaml` 已开启目录，开发默认 `./data/olixops.db`。Docker 使用 `/data/olixops.db`，目录须挂载 PVC。首次启动只初始化模板和端口，**不会扫描或修改集群**。
+`configs/config.yaml` 已开启目录，开发默认 `./data/olixops.db`。Docker 使用 `/data/olixops.db`，目录须挂载 PVC。初始化只补模板和端口；启动后的沙箱回收任务会读取已保存的过期部署，并按原删除流程清理资源。没有过期沙箱时不会因此变更集群。
 
 ```yaml
 catalog:
@@ -52,13 +52,17 @@ catalog:
 
 每项可用对应环境变量覆盖，例如 `CATALOG_ENABLED`、`CATALOG_DATABASE_PATH`、`CATALOG_PORT_START`。同一 gateway-id 的集群、网关与范围绑定在数据库中；更换入口须恢复原配置或使用新 ID，旧部署不能拿新入口执行。当前 API 面向一个已配置入口，不支持请求指定连接地址。
 
-[deployments/catalog.yaml](../deployments/catalog.yaml) 提供单副本、Recreate、PVC、非 root UID/GID 10001 和 InCluster 示例，不自动执行。先准备 `olixops` Namespace、专用 ServiceAccount/RBAC、`olixops-control` Secret 的 `api-key`。示例数据库 PVC 使用集群默认 StorageClass，需要时显式指定。
+[deployments/catalog.yaml](../deployments/catalog.yaml) 提供 Namespace、ServiceAccount、ConfigMap 配置文件、单副本 Recreate Deployment、PVC、ClusterIP Service 及 `/k8sctl` 前缀的 Higress Ingress；Pod 使用非 root UID/GID 10001 和 InCluster Provider，不自动执行。部署前准备 ServiceAccount 的 RBAC、`olixops-control` Secret 的 `api-key`，核对镜像地址和入口域名/TLS。示例数据库 PVC 使用集群默认 StorageClass，需要时显式指定。完整步骤见 [容器部署文档](container-deployment.md)。
 
 数据库文件权限 0600，目录新建时 0700；已加入 Git 和 Docker context 忽略。备份时先停止进程，再一起保存数据库及 WAL/SHM，或采用 SQLite 一致性备份工具；不要只复制运行中的主文件。不要清空 SQLite 来“修复”端口占用。
 
 ## 标准模板与参数
 
-内置 `redis:1` 与 `postgres:1`，实际软件镜像分别为示例固定版本 `redis:7.4.2`、`postgres:17.4`，不会追踪 latest 或自动升级。上线前按团队批准的版本保存新模板。每个实例包含独立名字的 StatefulSet、ClusterIP Service、ConfigMap、显式 PVC，部署时另生成 TCPRoute。实例资源名为 `name-<随机ID前8位>`，归属使用完整 instanceId 标签，不靠名字猜用户。
+首批扩展已加入七类服务与简化部署入口，当前推荐模板/参数/默认凭据策略见 [常用开发服务](standard-service-quickstart.md)。下文 Redis/PG v1 的凭据必填示例保留用于历史接口说明；新入口默认选择 Redis/PG v2，其他五类 v1。
+
+历史内置 `redis:1` 与 `postgres:1`，实际软件镜像分别为示例固定版本 `redis:7.4.2`、`postgres:17.4`，不会追踪 latest 或自动升级。上线前按团队批准的版本保存新模板。每个实例包含独立名字的 StatefulSet、ClusterIP Service、ConfigMap、显式 PVC，部署时另生成 TCPRoute。实例资源名为 `name-<随机ID前8位>`，归属使用完整 instanceId 标签，不靠名字猜用户。
+
+当前模板校验不支持 Redis Operator 的 `Redis` / `RedisReplication` 等自定义资源。本次 Operator 实例通过本地 kubectl 创建，端口通过 `sync_gateway_ports` 导入为 `external` 占用，不能用标准实例部署/删除/访问验证接口管理它；后续接入需要单独设计 CRD 适配、归属识别和生命周期，不能仅替换容器镜像。
 
 | 参数 | Redis 默认 | PostgreSQL 默认 | 说明 |
 | --- | --- | --- | --- |
@@ -79,14 +83,14 @@ Redis 后端固定 6379、AOF 持久化，环境变量引用 Secret 供 requirep
 
 ## 智能体调用顺序
 
-1. `list_service_templates` / `get_service_template`：获得 schema、默认参数，向用户补齐 Namespace、StorageClass、Secret 引用。
+1. `list_service_templates` / `get_service_template`：获得 schema、默认参数，向用户确认 Namespace；StorageClass/凭据按所选模板版本准备。Namespace 必填，实际执行部署时检查并在不存在时自动创建；预览、保存和准备部署不会创建 Namespace。
 2. `preview_service_config`：本地渲染预览，不写数据库或集群。
 3. `save_service_config`：创建独立实例或保存新配置修订；不会占端口。
 4. `sync_gateway_ports` / `list_gateway_ports`：核对共用入口。30000–30200 **含两端，共 201 个端口**；外部端口与进程端口、NodePort 分开。
 5. `prepare_service_deployment`：固定 instanceId、revision、port、requestId，事务预留并返回 deploymentId、最终 YAML 和 SHA-256 摘要。
 6. `deploy_service(deploymentId)`：不再让智能体拼 YAML。检查 Namespace、StorageClass、Secret、资源归属，server dry-run，增量维护共享 Service/Listener，再 apply 实例 YAML。
 7. `get_service_deployment`：查询实际 Pod/StatefulSet、PVC、Gateway、Listener 和 TCPRoute 条件，轮询至就绪。
-8. `verify_service_access`：从控制服务经 LB 端口执行 Redis AUTH/PING 或 PostgreSQL SELECT 1，分别返回 TCP/协议结果。用户网络始终未验证；需用户从自身网络连接确认。
+8. `verify_service_access`：从控制服务经 LB 端口执行所选软件的固定只读协议检查，分别返回 TCP/协议结果。用户网络始终未验证；需用户从自身网络连接确认。
 
 实例创建和配置保存的 `requestId` 共用同一幂等空间；准备、手工领用、释放分别在各自动作空间幂等。重试必须复用相同 requestId 和相同参数，改变参数须用新 ID。更新配置必须传当前 `expectedRevision`，修订从 1 开始。配置版本与部署版本可以不同，部署始终绑定明确修订。
 
@@ -96,6 +100,8 @@ REST 均在 `/api/v1`，沿用 `X-Olixops-Control-Key`。无参数查询 GET，�
 
 | HTTP 方法与路径 | MCP 工具 | 属性 |
 | --- | --- | --- |
+| GET /services/standard | list_standard_services | 读 |
+| POST /services/deploy-standard | deploy_standard_service | 写 SQLite/Kubernetes；namespace 必填，不存在则自动创建 |
 | GET /templates | list_service_templates | 读 |
 | POST /templates/get | get_service_template | 读 |
 | POST /templates/save | save_service_template | 写 SQLite |
@@ -116,7 +122,7 @@ REST 均在 `/api/v1`，沿用 `X-Olixops-Control-Key`。无参数查询 GET，�
 | POST /ports/release | release_gateway_port | 写 SQLite，读集群 |
 | POST /ports/events | list_gateway_port_events | 读 |
 
-新增 **11 个读工具、8 个写工具**。目录开启时总计 27 读 + 21 写 = 48；目录关闭时沿用 16 读 + 13 写 = 29。`MCP_WRITE_ENABLED=false` 不注册任何写工具。`KUBERNETES_WRITE_ENABLED=false` 阻止集群变更，但仍允许目录配置、模板和台账的数据库写入；两个开关不能混为一谈。REST 数据库操作沿用 REST key，无新写开关。MCP 标注不替代未来权限。
+目录提供 **12 个读工具、9 个写工具**。目录开启时总计 28 读 + 22 写 = 50；目录关闭时沿用 16 读 + 13 写 = 29。`MCP_WRITE_ENABLED=false` 不注册任何写工具。`KUBERNETES_WRITE_ENABLED=false` 阻止集群变更，但仍允许目录配置、模板和台账的数据库写入；两个开关不能混为一谈。REST 数据库操作沿用 REST key，无新写开关。MCP 标注不替代未来权限。
 
 ### 保存新 Redis 配置示例
 
@@ -182,4 +188,4 @@ HTTP：`POST /api/v1/services/prepare-deployment`；MCP：`prepare_service_deplo
 - 按 UID 删除的实际 HTTP 请求、保留 PVC、删除挂起不释放、重复部署不重复 apply。
 - 真实 MCP SDK 与 HTTP 共用记录、工具发现数量/读写标注、业务错误码和 REST key/request ID。
 
-执行 gofmt、go test ./...、go vet ./...、静态 CGO_ENABLED=0 构建。容器完整构建目前遇到 Docker Hub 拉取基础镜像超时/连接被拒绝，须网络恢复后补验。真实 Redis/PG、LB 转发、StorageClass 和协议访问需要部署环境联调，本次没有向用户集群写入。
+执行 gofmt、go test ./...、go vet ./...、静态 CGO_ENABLED=0 构建。容器镜像与控制服务的 Higress HTTP 路由已验证，详见容器部署文档；真实 Redis/PG、StorageClass 和数据库协议访问仍需部署环境联调。

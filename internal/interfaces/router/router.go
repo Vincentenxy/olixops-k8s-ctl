@@ -30,19 +30,29 @@ func newRouter(cfg *config.Config, catalog *catalogapp.Service, services ...*app
 
 	health := handler.NewHealthHandler(cfg.App.Name, cfg.App.Version)
 	api := r.Group("/api")
-	v1 := api.Group("/v1")
-	pub := v1.Group("/pub")
-	pub.GET("/health", health.Health)
-	pub.GET("/ready", health.Ready)
-	if len(services) > 0 && services[0] != nil {
-		cluster := handler.NewClusterHandler(services[0])
-		registerMCP(pub, cfg, services[0], catalog)
-		registerClusterRoutes(v1, cfg, cluster)
+	{
+		v1 := api.Group("/v1")
+		{
+			pub := v1.Group("/pub")
+			{
+				pub.GET("/health", health.Health)
+				pub.GET("/ready", health.Ready)
+				if len(services) > 0 && services[0] != nil {
+					registerMCP(pub, cfg, services[0], catalog)
+				}
+			}
+
+			if len(services) > 0 && services[0] != nil {
+				cluster := handler.NewClusterHandler(services[0])
+				registerClusterRoutes(v1, cfg, cluster)
+			}
+
+			if catalog != nil {
+				handler.RegisterCatalog(v1.Group("", middleware.ControlKey(cfg.Control.APIKey)), catalog)
+			}
+		}
 	}
 
-	if catalog != nil {
-		handler.RegisterCatalog(v1.Group("", middleware.ControlKey(cfg.Control.APIKey)), catalog)
-	}
 	return r, nil
 }
 
@@ -58,22 +68,33 @@ func registerMCP(pub *gin.RouterGroup, cfg *config.Config, service *application.
 
 func registerClusterRoutes(v1 *gin.RouterGroup, cfg *config.Config, clusterHandler *handler.ClusterHandler) {
 	cluster := v1.Group("/cluster", middleware.ControlKey(cfg.Control.APIKey))
+	{
+		cluster.GET("/status", clusterHandler.Status)
 
-	cluster.GET("/status", clusterHandler.Status)
+		namespaces := cluster.Group("/namespaces")
+		{
+			namespaces.GET("", clusterHandler.Namespaces)
+			namespace := namespaces.Group("/:namespace")
+			{
+				namespace.GET("/resources", clusterHandler.Resources)
+				namespace.GET("/gateway-resources", clusterHandler.GatewayResources)
+				namespace.POST("/metadata", clusterHandler.UpdateNamespaceMetadata)
+			}
+		}
 
-	namespaces := cluster.Group("/namespaces")
-	namespaces.GET("", clusterHandler.Namespaces)
-	namespace := namespaces.Group("/:namespace")
-	namespace.GET("/resources", clusterHandler.Resources)
-	namespace.GET("/gateway-resources", clusterHandler.GatewayResources)
-	namespace.POST("/metadata", clusterHandler.UpdateNamespaceMetadata)
+		storageClasses := cluster.Group("/storage-classes")
+		{
+			storageClasses.GET("", clusterHandler.StorageClasses)
+		}
 
-	storageClasses := cluster.Group("/storage-classes")
-	storageClasses.GET("", clusterHandler.StorageClasses)
+		kubectl := cluster.Group("/kubectl")
+		{
+			kubectl.POST("/apply", clusterHandler.Apply)
+		}
 
-	kubectl := cluster.Group("/kubectl")
-	kubectl.POST("/apply", clusterHandler.Apply)
-
-	helm := cluster.Group("/helm")
-	helm.POST("/upgrade", clusterHandler.HelmUpgrade)
+		helm := cluster.Group("/helm")
+		{
+			helm.POST("/upgrade", clusterHandler.HelmUpgrade)
+		}
+	}
 }
