@@ -1,6 +1,7 @@
 package tests
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -19,6 +20,7 @@ import (
 	autoscalingv1 "k8s.io/api/autoscaling/v1"
 
 	"olixops-k8s-ctl/internal/application"
+	contract "olixops-k8s-ctl/internal/application/api"
 	"olixops-k8s-ctl/internal/domain"
 	"olixops-k8s-ctl/internal/infrastructure/config"
 	"olixops-k8s-ctl/internal/infrastructure/execctl"
@@ -273,20 +275,51 @@ func callOperation(t *testing.T, session *mcp.ClientSession, name string, args m
 	return string(data)
 }
 
-func TestMCPOperationsEndToEnd(t *testing.T) {
+func TestMCPOperationsEndToEnd(t *testing.T)  { testOperationsEndToEnd(t, false) }
+func TestHTTPOperationsEndToEnd(t *testing.T) { testOperationsEndToEnd(t, true) }
+func testOperationsEndToEnd(t *testing.T, httpOnly bool) {
 	f := newOperationFixture(t)
-	session := f.session(t)
-	tools, err := session.ListTools(context.Background(), nil)
-	require.NoError(t, err)
-	require.Len(t, tools.Tools, 29)
-	writes := map[string]bool{"dry_run_manifest": true, "apply_manifest": true, "helm_upgrade": true, "scale_workload": true, "restart_workload": true, "rollback_workload": true, "delete_resource": true, "helm_rollback": true, "helm_uninstall": true, "create_namespace": true, "delete_namespace": true, "update_namespace_metadata": true, "update_configmap": true}
-	for _, tool := range tools.Tools {
-		require.Equal(t, !writes[tool.Name], tool.Annotations.ReadOnlyHint, tool.Name)
-		if writes[tool.Name] && tool.Name != "dry_run_manifest" && tool.Name != "create_namespace" {
-			require.True(t, *tool.Annotations.DestructiveHint, tool.Name)
+	var call func(string, map[string]any) string
+	if !httpOnly {
+		session := f.session(t)
+		tools, err := session.ListTools(context.Background(), nil)
+		require.NoError(t, err)
+		require.Len(t, tools.Tools, 29)
+		writes := map[string]bool{"dry_run_manifest": true, "apply_manifest": true, "helm_upgrade": true, "scale_workload": true, "restart_workload": true, "rollback_workload": true, "delete_resource": true, "helm_rollback": true, "helm_uninstall": true, "create_namespace": true, "delete_namespace": true, "update_namespace_metadata": true, "update_configmap": true}
+		for _, tool := range tools.Tools {
+			require.Equal(t, !writes[tool.Name], tool.Annotations.ReadOnlyHint, tool.Name)
+			if writes[tool.Name] && tool.Name != "dry_run_manifest" && tool.Name != "create_namespace" {
+				require.True(t, *tool.Annotations.DestructiveHint, tool.Name)
+			}
+		}
+		call = func(name string, args map[string]any) string { return callOperation(t, session, name, args, false) }
+	} else {
+		f.cfg.MCP.Enabled = false
+		f.cfg.Control.APIKey = "test-operator-key"
+		engine, e := router.New(f.cfg, f.service)
+		require.NoError(t, e)
+		call = func(name string, args map[string]any) string {
+			t.Helper()
+			var route contract.Route
+			for _, r := range contract.Routes {
+				if r.Tool == name {
+					route = r
+					break
+				}
+			}
+			require.NotEmpty(t, route.Path, name)
+			raw, e := json.Marshal(args)
+			require.NoError(t, e)
+			req := httptest.NewRequest(route.Method, route.Path, bytes.NewReader(raw))
+			req.Header.Set("X-Olixops-Control-Key", "test-operator-key")
+			req.Header.Set("Content-Type", "application/json")
+			response := httptest.NewRecorder()
+			engine.ServeHTTP(response, req)
+			require.Equal(t, 200, response.Code, name+": "+response.Body.String())
+			return response.Body.String()
 		}
 	}
-	call := func(name string, args map[string]any) string { return callOperation(t, session, name, args, false) }
+
 	detail := call("get_resource", map[string]any{"namespace": "demo", "kind": "Pod", "name": "web-0"})
 	require.Contains(t, detail, "nginx:stable")
 	require.NotContains(t, detail, "sensitive-env")

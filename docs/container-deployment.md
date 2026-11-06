@@ -1,5 +1,7 @@
 # Docker 打包与 Kubernetes 部署
 
+> 2026-11-06 认证更新：已实现可选公司 JWT/PAT 认证。`auth.enabled=true` 时业务接口需要 Bearer，MCP 改为 `/api/v1/mcp`（Higress 下加 `/k8sctl`），旧 `/api/v1/pub/mcp` 不注册。本文原公开入口/API key 或待实现认证描述仅适用于旧兼容模式；资源级授权仍待实现。配置、令牌接口与迁移见 [认证接入说明](authentication.md)。
+
 镜像提供 HTTP 与 MCP 服务，包含 kubectl、Helm 3 和 CA 证书。SQLite 内嵌在应用中，不需要部署数据库服务。镜像以 UID/GID 10001 运行；数据库写入 `/data/olixops.db`，CLI 临时文件使用 `/tmp`，Helm 缓存使用用户主目录，这些位置需要可写。
 
 ## 构建镜像
@@ -62,7 +64,7 @@ Dockerfile 默认使用 Docker Hub 的 `golang:1.26-alpine` 构建、`alpine:3.2
 - ServiceAccount 对应目标 Namespace/资源的 Kubernetes RBAC；清单创建身份，不包含 Role/ClusterRole/Binding，也不会授予 cluster-admin。缺少授权时进程仍可能启动，但集群操作会返回 Forbidden。
 
   可核对并单独应用 [基础 RBAC](../deployments/rbac.yaml)，具体范围与操作见 [Kubernetes 权限说明](kubernetes-rbac.md)。该文件的业务 Namespace 是 `wx-test-ns-001`、`wx-test-ns-002`，控制服务位于 `olixops`。
-- Secret `olixops-control`，包含 `api-key`。应用监听非回环地址时会检查这个配置，REST 请求通过 `X-Olixops-Control-Key` 携带。
+- 旧 API-key 兼容模式要求 Secret `olixops-control`，包含 `api-key`。应用监听非回环地址时会检查这个配置，REST 请求通过 `X-Olixops-Control-Key` 携带。JWT/PAT 模式不读取此旧密钥，改为准备认证密钥；volume 允许缺失，旧模式仍由启动校验拒绝缺失密钥。
 - 可用的默认 StorageClass，或在 PVC 中显式填写 `storageClassName`。底层存储须支持 SQLite 的文件锁；不要让多个进程同时使用这份数据库。
 - 私有镜像仓库需要的 `imagePullSecrets`，按仓库情况加入 Pod 配置。
 - IngressClass `higress`，以及入口域名的 DNS 和所需 TLS 证书。部署清单使用域名 `efficient-lab.qiuer.net`，可以修改 `spec.rules[].host`；如果开启示例 TLS 部分，`tls.hosts` 也要一起修改。
@@ -80,7 +82,7 @@ kubectl -n olixops create serviceaccount olixops-k8s-ctl --dry-run=client -o yam
 bash scripts/prepare-control-secret.sh
 ```
 
-脚本使用 kubectl 和 OpenSSL，只在 Secret 不存在时创建。随机 key 保存在 Git 忽略的 `.local/control-api-key`，权限为 0600，不输出内容；重复执行不会覆盖已有 Secret。Pod 出现 `FailedMount: secret "olixops-control" not found` 时，执行此脚本补齐同 Namespace 的 Secret，kubelet 会自动重试挂载，无需删除 Pod。
+脚本使用 kubectl 和 OpenSSL，只在 Secret 不存在时创建。随机 key 保存在 Git 忽略的 `.local/control-api-key`，权限为 0600，不输出内容；重复执行不会覆盖已有 Secret。Pod 出现 `FailedMount: secret "olixops-control" not found` 时，执行此脚本补齐同 Namespace 的 Secret，旧版本 kubelet 会自动重试挂载，无需删除 Pod。当前 YAML 的该 Secret 为可选挂载；旧 API-key 模式缺失时应用会启动失败，仍需补建并重启。
 
 如果已有自己的 key，可以改为从受保护的本地文件创建 Secret，不将真实 key 写到命令参数或 Git 中：
 
@@ -179,3 +181,18 @@ codex mcp add k8s-ctl-cluster --url http://127.0.0.1:8092/api/v1/pub/mcp
 首次直接访问 Docker Hub 构建超时；后续通过 `BASE_IMAGE_REGISTRY=m.daocloud.io/docker.io` 和 `GOPROXY=https://goproxy.cn,direct` 成功构建 Linux amd64 镜像并推送 `harbor.gtjaqh.net/lucy-dev/k8s-ctl:0.0.1-alpha.8`。容器烟测验证非 root 启动、挂载 Secret key 文件、健康检查和带 key 的模板查询。
 
 现场修复：缺失 `olixops-control` Secret 导致 FailedMount，补建后发现旧 `alpha.1` 镜像不支持 `api-key-file`；已将 Deployment 更新到 `alpha.8`，Pod 达到 1/1 Ready、0 次重启。经 LB 和 `Host: efficient-lab.qiuer.net` 验证 `/k8sctl/api/v1/pub/health` 返回成功，MCP 握手、48 个工具发现和 `list_service_templates` 只读调用通过。该验证未执行 Redis/PG 部署。
+
+
+## 可选的容器诊断桥接
+
+Kubernetes MCP Server v0.1.2 的私有 sidecar 接入、`exec_pod_command`、REST 日志/执行入口及配置/RBAC 见 [接入说明](kubernetes-mcp-integration.md)。默认关闭，启用后在原有工具集上增加一个写工具；已有 `get_pod_logs` 复用，不重复注册上游工具。客户端继续使用 k8s-ctl 的 JWT/PAT 认证入口，不直连 sidecar。
+
+
+开发人员使用的两个诊断工具、按用户精确授权、managed 本地 MCP 验证和文件读取新增边界，见 [开发人员 MCP 诊断](developer-diagnostics.md)。该模式与完整管理工具集分开部署。
+
+
+### 下载地址与网关前缀
+
+主 MCP 文件下载采用“准备引用 + 认证 HTTP 流”的方式。基础配置及 catalog.yaml 的 ConfigMap 已设置 `server.public-url: https://efficient-lab.qiuer.net/k8sctl`；更换域名时同步修改为实际地址，含 Higress 路径前缀。该配置不改变服务监听路由，沿用现有 `/k8sctl` 重写。不要将容器内部 Service 地址作为外部下载地址。下载依然携带有效 PAT/JWT，不生成公开下载链接。
+
+当前下载成功响应为原始二进制流，无固定大小上限；应用未设置总下载超时，但 Higress/客户端/集群连接可能中断。网关缓冲、长连接与大文件并发的专项调优留待第二阶段验证，见 [待办](roadmap.md)。

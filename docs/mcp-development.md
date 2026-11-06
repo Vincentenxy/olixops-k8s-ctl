@@ -1,5 +1,9 @@
 # MCP 开发方案与实现记录
 
+> 2026-11-06 双入口更新：主 MCP 现有业务工具均有认证 HTTP 对应入口，终端及文件准备接口已补齐；关闭主 MCP 后仍可作为 HTTP 操作器使用。共享契约、最新开关和调用示例见 [HTTP 操作器指南](http-operator-guide.md)，上层多集群路由仍待实现。
+
+> 2026-11-06 认证更新：已实现可选公司 JWT/PAT 认证。`auth.enabled=true` 时业务接口需要 Bearer，MCP 改为 `/api/v1/mcp`（Higress 下加 `/k8sctl`），旧 `/api/v1/pub/mcp` 不注册。本文原公开入口/API key 或待实现认证描述仅适用于旧兼容模式；资源级授权仍待实现。配置、令牌接口与迁移见 [认证接入说明](authentication.md)。
+
 更新时间：2026-10-26。
 
 ## 当前结果
@@ -266,3 +270,19 @@ go vet ./...
 [完整参数、调用链与失败恢复](standard-services.md)。GET 状态读取不更新数据库；verify 是明确的服务端经 LB 的非写入协议验证，不证明用户网络可达。原始渲染 YAML 按原文返回。业务错误通过 isError 文本带同一 reason；不要只检查 HTTP 200。
 
 新增测试见 `internal/application/catalog/service_test.go`、`internal/infrastructure/kubernetes/catalog_test.go`、`tests/catalog_interfaces_test.go`：SQLite 事务和重启、双连接抢端口、模板/配置不可变、幂等、端口冲突、部分部署重试、按 UID 删除、PVC 保留、共享入口增量更新、REST/MCP 共用记录与 27/48 工具发现。
+
+
+## 可选的容器诊断桥接
+
+Kubernetes MCP Server v0.1.2 的私有 sidecar 接入、`exec_pod_command`、REST 日志/执行入口及配置/RBAC 见 [接入说明](kubernetes-mcp-integration.md)。默认关闭，启用后在原有工具集上增加一个写工具；已有 `get_pod_logs` 复用，不重复注册上游工具。客户端继续使用 k8s-ctl 的 JWT/PAT 认证入口，不直连 sidecar。
+
+
+开发人员使用的两个诊断工具、按用户精确授权、managed 本地 MCP 验证和文件读取新增边界，见 [开发人员 MCP 诊断](developer-diagnostics.md)。该模式与完整管理工具集分开部署。
+
+
+## 主 MCP Shell 会话与文件下载
+
+Shell 开启后，主认证 MCP 除单次 exec 外增加 open_pod_terminal、write_pod_terminal、read_pod_terminal、close_pod_terminal、download_pod_file 和 upload_pod_file 六个工具；不注册到诊断专用模式。完整管理、目录、exec 与 Shell 均开启时为 57 个工具，运行时以 tools/list 为准。download_pod_file 现返回一次性下载信息，由认证 HTTP POST /api/v1/cluster/pods/files/download 流式传输，取消旧版 Base64 与 1 MiB 上限；客户端需适配新输出。配置、参数、用户隔离与流式传输见 [Shell MCP 使用说明](shell-mcp.md)。测试记录见 [终端与下载验证](testing/terminal-download-2026-11-06.md)。
+
+
+文件上传接口：`upload_pod_file` 准备绑定用户/Pod UID 的五分钟单次引用，`POST /api/v1/cluster/pods/files/upload` 接收原始字节及 `X-Upload-Id`。固定脚本通过同 Provider 的 SPDY stdin 流写临时文件，完整后硬链接发布，拒绝覆盖。复用现有主 MCP 显式 Shell 开关、独立 upload_file grants 动作及集中拦截器，不新增外部 MCP 服务。上传没有固定大小限制与断点续传，详见 [Shell MCP](shell-mcp.md) 和 [上传验证](testing/http-upload-2026-11-06.md)。

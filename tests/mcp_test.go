@@ -196,6 +196,8 @@ users:
 
 func TestMCPConfigEnvironment(t *testing.T) {
 	t.Setenv("SERVER_HOST", "127.0.0.1")
+	t.Setenv("POD_EXEC_ENABLED", "false")
+	t.Setenv("K8S_CTL_SHELL_ENABLED", "false")
 	t.Setenv("MCP_WRITE_ENABLED", "true")
 	t.Setenv("MCP_ENABLED", "false")
 	cfg, err := config.Load("../configs")

@@ -1,0 +1,48 @@
+# Dedicated developer diagnostics service. Prepare auth Secret and exact grants before use.
+server:
+  host: 0.0.0.0
+  port: 8091
+  mode: release
+app:
+  name: k8s-ctl-diagnostics
+  version: 0.2.0
+kubernetes:
+  in-cluster: true
+  write-enabled: true # pods/exec is a Kubernetes write; management routes are hidden below.
+  allowed-namespaces: [demo]
+  command-timeout-seconds: 30
+  kubeconfig:
+    source: in-cluster
+mcp:
+  enabled: true
+  write-enabled: true
+  diagnostics-only: true
+catalog:
+  enabled: false
+control:
+  api-key: ""
+auth:
+  enabled: true
+  company:
+    enabled: false # Fill company issuer/audience/public key to use company JWT.
+  pat:
+    enabled: true
+    issuer: k8s-ctl
+    audience: k8s-ctl
+    key-id: pat-v1
+    private-key-file: /app/secrets/auth/pat-private.pem
+    public-key-file: /app/secrets/auth/pat-public.pem
+    database-path: /data/auth.db
+pod-exec:
+  enabled: true
+  mode: sidecar
+  endpoint: http://127.0.0.1:8082/mcp
+  allowed-namespaces: [demo]
+  grants:
+    - user-id: REPLACE_WITH_VERIFIED_USER_ID
+      namespace: demo
+      pod: REPLACE_WITH_POD_NAME
+      container: app
+      pod-uid: REPLACE_WITH_POD_UID
+      actions: [logs, environment, process_list, process_status, memory_usage, read_file]
+      files: [/app/config.yaml]

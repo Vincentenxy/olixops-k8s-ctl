@@ -1,0 +1,58 @@
+# Independent local instance. Mount/generate JWT keys and issue PAT with cmd/pat.
+app:
+  name: k8s-ctl
+  version: 0.2.0
+server:
+  host: 127.0.0.1
+  port: 8091
+  mode: debug
+  public-url: http://127.0.0.1:8091
+http:
+  enabled: true
+mcp:
+  enabled: true
+  write-enabled: true
+  diagnostics-only: false
+cluster:
+  id: poc
+auth:
+  enabled: true
+  company:
+    enabled: false
+  pat:
+    enabled: true
+    issuer: k8s-ctl
+    audience: k8s-ctl
+    key-id: pat-v1
+    private-key-file: /path/to/mounted/pat-private.pem
+    public-key-file: /path/to/mounted/pat-public.pem
+    database-path: ./data/auth.db
+kubernetes:
+  in-cluster: false
+  write-enabled: true
+  allowed-namespaces: [developer-demo]
+  command-timeout-seconds: 120
+  kubectl: kubectl
+  helm: helm
+  kubeconfig:
+    source: file
+    path: ~/.kube/config
+pod-exec:
+  enabled: true
+  mode: managed
+  binary: /path/to/kubernetes-mcp-server
+  allowed-namespaces: [developer-demo]
+  grants:
+    - user-id: developer-example
+      namespace: developer-demo
+      pod: app-example
+      container: app
+      actions: [shell, logs, download_file, upload_file]
+shell:
+  enabled: true
+  interceptor:
+    enabled: true
+    provider: allow-all
+catalog:
+  enabled: false
+  cluster: poc

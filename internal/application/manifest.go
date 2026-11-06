@@ -1,8 +1,8 @@
 package application
 
 import (
-	"fmt"
 	"io"
+	"olixops-k8s-ctl/internal/domain/fault"
 	"strings"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -21,13 +21,13 @@ type ManifestResource struct {
 
 func ValidateManifest(manifest, requestedNamespace string, allowedNamespaces map[string]struct{}) ([]ManifestResource, error) {
 	if len(validation.IsDNS1123Label(requestedNamespace)) > 0 {
-		return nil, fmt.Errorf("invalid namespace")
+		return nil, fault.Invalid("invalid namespace")
 	}
 	if strings.TrimSpace(manifest) == "" {
-		return nil, fmt.Errorf("manifest is required")
+		return nil, fault.Invalid("manifest is required")
 	}
 	if len(manifest) > 2<<20 {
-		return nil, fmt.Errorf("manifest exceeds 2 MiB")
+		return nil, fault.Invalid("manifest exceeds 2 MiB")
 	}
 	decoder := yaml.NewYAMLOrJSONDecoder(strings.NewReader(manifest), 4096)
 	resources := make([]ManifestResource, 0, 8)
@@ -37,7 +37,7 @@ func ValidateManifest(manifest, requestedNamespace string, allowedNamespaces map
 			if err == io.EOF {
 				break
 			}
-			return nil, fmt.Errorf("decode manifest document %d: %w", index+1, err)
+			return nil, fault.Invalid("invalid manifest document %d", index+1)
 		}
 		if len(object) == 0 {
 			continue
@@ -47,36 +47,36 @@ func ValidateManifest(manifest, requestedNamespace string, allowedNamespaces map
 		kind := item.GetKind()
 		name := item.GetName()
 		if apiVersion == "" || kind == "" || name == "" {
-			return nil, fmt.Errorf("manifest document %d requires apiVersion, kind and metadata.name", index+1)
+			return nil, fault.Invalid("manifest document %d requires apiVersion, kind and metadata.name", index+1)
 		}
 		if kind == "Secret" {
-			return nil, fmt.Errorf("Secret manifests are not accepted; use a managed Secret reference")
+			return nil, fault.Forbidden("Secret manifests are not accepted; use a managed Secret reference")
 		}
 		if _, ok := domain.LookupResource(kind); !ok {
-			return nil, fmt.Errorf("manifest kind %q is not allowed", kind)
+			return nil, fault.Forbidden("manifest kind is not allowed")
 		}
 		if !domain.ValidAPIVersion(kind, apiVersion) {
-			return nil, fmt.Errorf("unsupported apiVersion for %s", kind)
+			return nil, fault.Invalid("unsupported apiVersion for %s", kind)
 		}
 		if len(validation.IsDNS1123Subdomain(name)) > 0 {
-			return nil, fmt.Errorf("invalid metadata.name")
+			return nil, fault.Invalid("invalid metadata.name")
 		}
 		namespace := item.GetNamespace()
 		if namespace == "" {
 			namespace = requestedNamespace
 		}
 		if namespace != requestedNamespace {
-			return nil, fmt.Errorf("manifest resource %s/%s targets namespace %q, expected %q", kind, name, namespace, requestedNamespace)
+			return nil, fault.Invalid("manifest resource %s/%s targets namespace %q, expected %q", kind, name, namespace, requestedNamespace)
 		}
 		if len(allowedNamespaces) > 0 {
 			if _, ok := allowedNamespaces[namespace]; !ok {
-				return nil, fmt.Errorf("manifest namespace %q is not allowed", namespace)
+				return nil, fault.Forbidden("manifest namespace is not allowed")
 			}
 		}
 		resources = append(resources, ManifestResource{APIVersion: apiVersion, Kind: kind, Namespace: namespace, Name: name})
 	}
 	if len(resources) == 0 {
-		return nil, fmt.Errorf("manifest contains no resources")
+		return nil, fault.Invalid("manifest contains no resources")
 	}
 	return resources, nil
 }

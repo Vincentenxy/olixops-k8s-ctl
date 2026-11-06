@@ -1,150 +1,89 @@
 package handler
 
 import (
-	"encoding/json"
-	"io"
-	"net/http"
-
+	"context"
 	"github.com/gin-gonic/gin"
-
 	"olixops-k8s-ctl/internal/application"
-	"olixops-k8s-ctl/pkg/response"
+	"olixops-k8s-ctl/internal/application/api"
+	"time"
 )
 
 type ClusterHandler struct {
-	service *application.ClusterService
+	operations   api.Operations
+	writeTimeout time.Duration
 }
 
-func NewClusterHandler(service *application.ClusterService) *ClusterHandler {
-	return &ClusterHandler{service: service}
+func NewClusterHandler(service api.Service, timeout ...time.Duration) *ClusterHandler {
+	budget := 120 * time.Second
+	if len(timeout) > 0 && timeout[0] > 0 {
+		budget = timeout[0]
+	}
+	return &ClusterHandler{api.Operations{Service: service}, budget}
 }
-
 func (h *ClusterHandler) Status(c *gin.Context) {
-	data, err := h.service.Status(c.Request.Context())
-	if err != nil {
-		h.internalError(c, err)
-		return
-	}
-	response.Success(c, data)
+	ctx, cancel := context.WithTimeout(c.Request.Context(), api.ReadTimeout)
+	defer cancel()
+	out, e := h.operations.ClusterStatus(ctx, api.EmptyInput{})
+	operationResult(c, out, e)
 }
-
 func (h *ClusterHandler) Namespaces(c *gin.Context) {
-	data, err := h.service.ListNamespaces(c.Request.Context())
-	if err != nil {
-		h.internalError(c, err)
-		return
-	}
-	response.Success(c, gin.H{"items": data})
+	ctx, cancel := context.WithTimeout(c.Request.Context(), api.ReadTimeout)
+	defer cancel()
+	out, e := h.operations.Namespaces(ctx, api.EmptyInput{})
+	operationResult(c, out, e)
 }
-
 func (h *ClusterHandler) StorageClasses(c *gin.Context) {
-	data, err := h.service.ListStorageClasses(c.Request.Context())
-	if err != nil {
-		h.internalError(c, err)
-		return
-	}
-	response.Success(c, gin.H{"items": data})
+	ctx, cancel := context.WithTimeout(c.Request.Context(), api.ReadTimeout)
+	defer cancel()
+	out, e := h.operations.StorageClasses(ctx, api.EmptyInput{})
+	operationResult(c, out, e)
 }
-
 func (h *ClusterHandler) Resources(c *gin.Context) {
-	data, err := h.service.ListResources(c.Request.Context(), c.Param("namespace"))
-	if err != nil {
-		h.clientError(c, err)
-		return
-	}
-	response.Success(c, data)
+	ctx, cancel := context.WithTimeout(c.Request.Context(), api.ReadTimeout)
+	defer cancel()
+	out, e := h.operations.Resources(ctx, api.NamespaceInput{Namespace: c.Param("namespace")})
+	operationResult(c, out, e)
 }
-
 func (h *ClusterHandler) GatewayResources(c *gin.Context) {
-	data, err := h.service.ListGatewayResources(c.Request.Context(), c.Param("namespace"))
-	if err != nil {
-		h.clientError(c, err)
-		return
-	}
-	response.Success(c, data)
+	ctx, cancel := context.WithTimeout(c.Request.Context(), api.ReadTimeout)
+	defer cancel()
+	out, e := h.operations.GatewayResources(ctx, api.NamespaceInput{Namespace: c.Param("namespace")})
+	operationResult(c, out, e)
 }
 
 type ApplyRequest struct {
-	Namespace  string `json:"namespace" binding:"required"`
-	Manifest   string `json:"manifest" binding:"required"`
-	ServerSide bool   `json:"serverSide"`
-	DryRun     bool   `json:"dryRun"`
+	api.ApplyInput
+	DryRun bool `json:"dryRun,omitempty"`
 }
 
+// Apply preserves the legacy HTTP result shape; both paths use the shared use case.
 func (h *ClusterHandler) Apply(c *gin.Context) {
-	var request ApplyRequest
-	if err := c.ShouldBindJSON(&request); err != nil {
-		response.AbortWithHTTPStatus(c, 400)
-		return
-	}
-	result, resources, err := h.service.ApplyManifest(c.Request.Context(), request.Manifest, request.Namespace, request.ServerSide, request.DryRun)
-	if err != nil {
-		h.clientError(c, err)
-		return
-	}
-	response.Success(c, gin.H{"resources": resources, "result": result})
+	operation(h.writeTimeout, func(ctx context.Context, in ApplyRequest) (any, error) {
+		var out api.ApplyOutput
+		var e error
+		if in.DryRun {
+			out, e = h.operations.DryRun(ctx, in.ApplyInput)
+		} else {
+			out, e = h.operations.Apply(ctx, in.ApplyInput)
+		}
+		return gin.H{"resources": out.Resources, "result": out.Result}, e
+	})(c)
 }
 
-type HelmUpgradeRequest struct {
-	Release    string `json:"release" binding:"required"`
-	Chart      string `json:"chart" binding:"required"`
-	Namespace  string `json:"namespace" binding:"required"`
-	ValuesYAML string `json:"valuesYaml"`
-	Wait       bool   `json:"wait"`
-}
-
-type NamespaceMetadataRequest struct {
-	Labels            map[string]string `json:"labels,omitempty"`
-	Annotations       map[string]string `json:"annotations,omitempty"`
-	RemoveLabels      []string          `json:"removeLabels,omitempty"`
-	RemoveAnnotations []string          `json:"removeAnnotations,omitempty"`
-}
-
-func (h *ClusterHandler) UpdateNamespaceMetadata(c *gin.Context) {
-	var request NamespaceMetadataRequest
-	decoder := json.NewDecoder(c.Request.Body)
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&request); err != nil {
-		response.AbortWithHTTPStatus(c, http.StatusBadRequest)
-		return
-	}
-	if err := decoder.Decode(&struct{}{}); err != io.EOF {
-		response.AbortWithHTTPStatus(c, http.StatusBadRequest)
-		return
-	}
-	result, err := h.service.UpdateNamespaceMetadata(c.Request.Context(), c.Param("namespace"), application.NamespaceMetadataChanges{
-		Labels:            request.Labels,
-		Annotations:       request.Annotations,
-		RemoveLabels:      request.RemoveLabels,
-		RemoveAnnotations: request.RemoveAnnotations,
-	})
-	if err != nil {
-		h.clientError(c, err)
-		return
-	}
-	response.Success(c, gin.H{"result": result})
-}
+type HelmUpgradeRequest = application.HelmUpgradeInput
 
 func (h *ClusterHandler) HelmUpgrade(c *gin.Context) {
-	var request HelmUpgradeRequest
-	if err := c.ShouldBindJSON(&request); err != nil {
-		response.AbortWithHTTPStatus(c, 400)
-		return
-	}
-	result, err := h.service.HelmUpgrade(c.Request.Context(), request.Release, request.Chart, request.Namespace, request.ValuesYAML, request.Wait)
-	if err != nil {
-		h.clientError(c, err)
-		return
-	}
-	response.Success(c, gin.H{"result": result})
+	operation(h.writeTimeout, func(ctx context.Context, in HelmUpgradeRequest) (any, error) {
+		out, e := h.operations.UpgradeHelm(ctx, in)
+		return gin.H{"result": out}, e
+	})(c)
 }
 
-func (h *ClusterHandler) clientError(c *gin.Context, err error) {
-	_ = err
-	response.AbortWithHTTPStatus(c, http.StatusBadRequest)
-}
+type NamespaceMetadataRequest = application.NamespaceMetadataChanges
 
-func (h *ClusterHandler) internalError(c *gin.Context, err error) {
-	_ = err
-	response.AbortWithHTTPStatus(c, http.StatusServiceUnavailable)
+func (h *ClusterHandler) UpdateNamespaceMetadata(c *gin.Context) {
+	operation(h.writeTimeout, func(ctx context.Context, in NamespaceMetadataRequest) (any, error) {
+		out, e := h.operations.NamespaceMetadata(ctx, api.NamespaceMetadataInput{Namespace: c.Param("namespace"), Labels: in.Labels, Annotations: in.Annotations, RemoveLabels: in.RemoveLabels, RemoveAnnotations: in.RemoveAnnotations})
+		return gin.H{"result": out}, e
+	})(c)
 }

@@ -3,19 +3,26 @@ package main
 import (
 	"context"
 	"errors"
+	"flag"
 	"fmt"
 	"net/http"
+	sessions "olixops-k8s-ctl/internal/application/shell"
+	"olixops-k8s-ctl/internal/application/shell/interceptor"
 	"os"
 	"os/signal"
 	"syscall"
 	"time"
 
 	"olixops-k8s-ctl/internal/application"
+	authapp "olixops-k8s-ctl/internal/application/auth"
 	catalogapp "olixops-k8s-ctl/internal/application/catalog"
+	authdomain "olixops-k8s-ctl/internal/domain/auth"
 	catalogdomain "olixops-k8s-ctl/internal/domain/catalog"
+	authinfra "olixops-k8s-ctl/internal/infrastructure/auth"
 	"olixops-k8s-ctl/internal/infrastructure/catalogdb"
 	"olixops-k8s-ctl/internal/infrastructure/config"
 	"olixops-k8s-ctl/internal/infrastructure/execctl"
+	"olixops-k8s-ctl/internal/infrastructure/k8smcp"
 	"olixops-k8s-ctl/internal/infrastructure/kubeconfig"
 	clusterk8s "olixops-k8s-ctl/internal/infrastructure/kubernetes"
 	"olixops-k8s-ctl/internal/interfaces/router"
@@ -25,7 +32,9 @@ import (
 )
 
 func main() {
-	cfg, err := config.Load("./configs")
+	configDir := flag.String("config-dir", "./configs", "directory containing config.yaml")
+	flag.Parse()
+	cfg, err := config.Load(*configDir)
 	if err != nil {
 		logger.Init("debug")
 		logger.L().Fatal("load config failed", zap.Error(err))
@@ -34,6 +43,23 @@ func main() {
 	logger.Init(cfg.Server.Mode)
 	defer logger.Sync()
 
+	var authentication *authapp.Service
+	if cfg.Auth.Enabled {
+		jwtAdapter, e := authinfra.NewJWT(cfg.Auth)
+		if e != nil {
+			logger.L().Fatal("init authentication failed", zap.Error(e))
+		}
+		var repository authdomain.Repository
+		if cfg.Auth.PAT.Enabled {
+			store, openErr := authinfra.Open(cfg.Auth.PAT.DatabasePath)
+			if openErr != nil {
+				logger.L().Fatal("init PAT database failed")
+			}
+			defer store.Close()
+			repository = store
+		}
+		authentication = authapp.New(jwtAdapter, jwtAdapter, repository)
+	}
 	kubeconfigReference := kubeconfig.Reference{
 		Source:    cfg.Kubernetes.Kubeconfig.Source,
 		Path:      cfg.Kubernetes.Kubeconfig.Path,
@@ -49,6 +75,14 @@ func main() {
 	if err != nil {
 		logger.L().Fatal("init kubeconfig provider failed", zap.Error(err))
 	}
+	var managedSnapshot *kubeconfig.SnapshotProvider
+	if cfg.PodExec.Enabled && cfg.PodExec.Mode == "managed" {
+		managedSnapshot, err = kubeconfig.Snapshot(context.Background(), kubeconfigProvider, kubeconfigReference)
+		if err != nil {
+			logger.L().Fatal("pin managed MCP cluster failed")
+		}
+		kubeconfigProvider = managedSnapshot
+	}
 	clusterClient, err := clusterk8s.New(cfg.Kubernetes, kubeconfigProvider)
 	if err != nil {
 		logger.L().Fatal("init kubernetes client failed", zap.Error(err))
@@ -60,9 +94,37 @@ func main() {
 		Helm:           cfg.Kubernetes.Helm,
 		TimeoutSeconds: cfg.Kubernetes.CommandTimeoutSecond,
 	})
-	clusterService := application.NewClusterService(clusterClient, runner, cfg.Kubernetes)
+	serviceOptions := []application.ServiceOption{application.WithClusterID(cfg.ClusterID())}
+	if cfg.PodExec.Enabled {
+		var backend *k8smcp.Client
+		var e error
+		if cfg.PodExec.Mode == "managed" {
+			backend, e = k8smcp.NewManaged(cfg.PodExec.Binary, managedSnapshot)
+		} else {
+			backend, e = k8smcp.New(cfg.PodExec.Endpoint)
+		}
+		if e != nil {
+			logger.L().Fatal("init Kubernetes MCP bridge failed", zap.Error(e))
+		}
+		serviceOptions = append(serviceOptions, application.WithPodExecutor(backend, cfg.PodExec.AllowedNamespaces))
+	}
+	serviceOptions = append(serviceOptions, application.WithShell(cfg.Shell.Enabled, cfg.Shell.Interceptor.Enabled, interceptor.AllowAll{}))
+	if cfg.MCP.DiagnosticsOnly || len(cfg.PodExec.Grants) > 0 {
+		serviceOptions = append(serviceOptions, application.WithDiagnosticGrants(cfg.PodExec.Grants))
+	}
+	if cfg.Shell.Enabled {
+		manager := sessions.NewManager(time.Duration(cfg.Shell.Terminal.IdleSeconds)*time.Second, time.Duration(cfg.Shell.Terminal.LifetimeSeconds)*time.Second, cfg.Shell.Terminal.MaxSessions, cfg.Shell.Terminal.MaxPerUser)
+		defer manager.Close()
+		serviceOptions = append(serviceOptions, application.WithTerminals(clusterClient, manager))
+	}
+	downloadBase := cfg.Server.PublicURL
+	if downloadBase == "" && (cfg.Server.Host == "127.0.0.1" || cfg.Server.Host == "localhost") {
+		downloadBase = fmt.Sprintf("http://%s:%d", cfg.Server.Host, cfg.Server.Port)
+	}
+	serviceOptions = append(serviceOptions, application.WithDownloadBaseURL(downloadBase))
+	clusterService := application.NewClusterService(clusterClient, runner, cfg.Kubernetes, serviceOptions...)
 	var catalogService *catalogapp.Service
-	if cfg.Catalog.Enabled {
+	if cfg.Catalog.Enabled && !cfg.MCP.DiagnosticsOnly {
 		store, openErr := catalogdb.Open(cfg.Catalog.DatabasePath)
 		if openErr != nil {
 			logger.L().Fatal("init catalog database failed", zap.Error(openErr))
@@ -97,7 +159,7 @@ func main() {
 		}()
 		defer func() { stopExpiry(); <-expiryDone }()
 	}
-	r, err := router.NewWithCatalog(cfg, clusterService, catalogService)
+	r, err := router.NewWithAuth(cfg, clusterService, catalogService, authentication)
 	if err != nil {
 		logger.L().Fatal("init router failed", zap.Error(err))
 	}

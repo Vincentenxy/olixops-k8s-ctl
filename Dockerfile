@@ -20,6 +20,10 @@ RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
     CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
     go build -mod=readonly -trimpath -ldflags="-s -w" -o /out/olixops-k8s-ctl ./cmd
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+    CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
+    go build -mod=readonly -trimpath -ldflags="-s -w" -o /out/k8sctl-pat ./cmd/pat
 
 FROM ${RUNTIME_IMAGE} AS runtime
 
@@ -29,6 +33,7 @@ RUN apk add --no-cache ca-certificates kubectl helm \
     && mkdir -p /data /app/configs && chown app:app /data
 WORKDIR /app
 COPY --from=build /out/olixops-k8s-ctl /app/olixops-k8s-ctl
+COPY --from=build /out/k8sctl-pat /app/k8sctl-pat
 # Keep developer configuration and local credentials out of the runtime image.
 COPY configs/config.container.yaml /app/configs/config.yaml
 USER 10001:10001

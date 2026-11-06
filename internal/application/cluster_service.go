@@ -2,7 +2,9 @@ package application
 
 import (
 	"context"
-	"fmt"
+	sessions "olixops-k8s-ctl/internal/application/shell"
+	"olixops-k8s-ctl/internal/application/shell/interceptor"
+	"olixops-k8s-ctl/internal/domain/fault"
 	"strings"
 
 	"olixops-k8s-ctl/internal/domain"
@@ -12,12 +14,23 @@ import (
 )
 
 type ClusterService struct {
-	client       *clusterk8s.Client
-	runner       *execctl.Runner
-	writeEnabled bool
-	allowedNS    map[string]struct{}
-	authorizer   domain.Authorizer
-	cluster      string
+	uploads                 uploads
+	downloads               downloads
+	terminals               *sessions.Manager
+	streamBackend           domain.PodStreamBackend
+	shellEnabled            bool
+	shellIntercept          bool
+	shellInterceptor        interceptor.Interceptor
+	diagnosticGrantsEnabled bool
+	diagnosticGrants        []domain.DiagnosticGrant
+	podExecutor             domain.PodExecutor
+	execNamespaces          map[string]bool
+	client                  *clusterk8s.Client
+	runner                  *execctl.Runner
+	writeEnabled            bool
+	allowedNS               map[string]struct{}
+	authorizer              domain.Authorizer
+	cluster                 string
 }
 
 func NewClusterService(client *clusterk8s.Client, runner *execctl.Runner, cfg config.KubernetesConfig, options ...ServiceOption) *ClusterService {
@@ -101,7 +114,7 @@ func (s *ClusterService) ListGatewayResources(ctx context.Context, namespace str
 
 func (s *ClusterService) ApplyManifest(ctx context.Context, manifest, namespace string, serverSide, dryRun bool) (execctl.Result, []ManifestResource, error) {
 	if !s.writeEnabled {
-		return execctl.Result{}, nil, fmt.Errorf("kubernetes write operations are disabled")
+		return execctl.Result{}, nil, fault.Disabled("kubernetes write operations are disabled")
 	}
 	if err := s.requireNamespace(namespace); err != nil {
 		return execctl.Result{}, nil, err
@@ -122,7 +135,7 @@ func (s *ClusterService) ApplyManifest(ctx context.Context, manifest, namespace 
 		return execctl.Result{}, nil, err
 	}
 	if s.runner == nil {
-		return execctl.Result{}, nil, fmt.Errorf("command runner is not configured")
+		return execctl.Result{}, nil, fault.Disabled("command runner is not configured")
 	}
 	result, err := s.runner.KubectlApply(ctx, manifest, namespace, serverSide, dryRun)
 	return result, resources, err
@@ -145,18 +158,18 @@ func (s *ClusterService) requireNamespace(namespace string) error {
 		return err
 	}
 	if !s.namespaceAllowed(namespace) {
-		return fmt.Errorf("namespace %q is not allowed", namespace)
+		return fault.Forbidden("namespace is not allowed by the configured scope")
 	}
 	return nil
 }
 
 func validateName(value, field string) error {
 	if value == "" || len(value) > 63 || strings.HasPrefix(value, "-") || strings.HasSuffix(value, "-") {
-		return fmt.Errorf("%s must be a DNS label", field)
+		return fault.Invalid("%s must be a DNS label", field)
 	}
 	for _, char := range value {
 		if (char < 'a' || char > 'z') && (char < '0' || char > '9') && char != '-' {
-			return fmt.Errorf("%s must be a lowercase DNS label", field)
+			return fault.Invalid("%s must be a lowercase DNS label", field)
 		}
 	}
 	return nil

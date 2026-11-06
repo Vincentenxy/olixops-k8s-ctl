@@ -1,6 +1,7 @@
 server:
   host: 127.0.0.1
   port: 8091
+  public-url: "" # Loopback is inferred; set the external URL including gateway prefix when deployed.
   mode: debug # debug / release / test
 
 app:
@@ -24,7 +25,54 @@ control:
   api-key: ""
 
 # MCP write tools are opt-in. The future authorization hook currently allows all.
+# Opt in after mounting RSA keys; see docs/authentication.md.
+auth:
+  enabled: true
+  company:
+    enabled: false
+    issuer: ""
+    audience: ""
+    key-id: ""
+    public-key: ""
+    public-key-file: ""
+  pat:
+    enabled: true
+    issuer: k8s-ctl
+    audience: k8s-ctl
+    key-id: pat-v1
+    private-key-file: .local/auth/pat-private.pem
+    public-key-file: .local/auth/pat-public.pem
+    database-path: ./data/auth.db
+
+# Local managed bridge; requires JWT/PAT, Kubernetes writes and an HTTP or writable MCP entry.
+pod-exec:
+  enabled: true
+  mode: managed
+  binary: /Users/vincent/Desktop/codes.nosync/olixops-k8s-ctl/.local/kubernetes-mcp-bin/kubernetes-mcp-server
+  grants:
+    - user-id: diagnostic-developer
+      namespace: env-vault
+      pod: env-vault-web-5dcdc4c59-7wt8t
+      container: env-vault-web
+      pod-uid: 49b4db43-e010-4ad7-8f9e-1b4080b4e576 # Last verified UID; update if Pod is recreated.
+      actions: [shell, logs, download_file]
+    - user-id: diagnostic-developer
+      namespace: env-vault
+      pod: env-vault-2
+      container: env-vault
+      pod-uid: 33e8b4c6-fd5a-4b67-9507-54acd4d1b3eb
+      actions: [shell, logs, download_file, upload_file]
+    - user-id: diagnostic-developer
+      namespace: env-vault
+      pod: k8s-ctl-file-transfer-demo
+      container: file-transfer
+      pod-uid: 65cd0ceb-990b-4ceb-ad52-ad71f4706cd4 # Temporary test Pod; remove after cleanup.
+      actions: [shell, logs, download_file, upload_file]
+  endpoint: http://127.0.0.1:8082/mcp
+  allowed-namespaces: [env-vault]
+
 mcp:
+  diagnostics-only: false # Enable for developer-facing log/exec-only service.
   enabled: true
   write-enabled: true
 # Embedded SQLite: use a persistent, writable directory. No separate DB server.
@@ -41,3 +89,19 @@ catalog:
   gateway-name: higress-tcp-gateway
   port-start: 30000
   port-end: 30200
+
+# Single-command shell through authenticated HTTP / main MCP; allow-all is a placeholder.
+shell:
+  terminal:
+    idle-seconds: 300
+    lifetime-seconds: 1800
+    max-sessions: 16
+    max-per-user: 4
+  enabled: true
+  interceptor:
+    enabled: true
+    provider: allow-all
+
+# Ordinary HTTP operations; file streams remain available to enabled MCP tools.
+http:
+  enabled: true

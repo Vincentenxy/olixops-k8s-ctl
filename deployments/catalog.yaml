@@ -21,11 +21,14 @@ metadata:
   namespace: olixops
 data:
   config.yaml: |
+    http:
+      enabled: true
     # Container defaults, mounted through the deployment ConfigMap.
     # The API key is read from a mounted Secret file at startup.
     server:
       host: 0.0.0.0
       port: 8091
+      public-url: https://efficient-lab.qiuer.net/k8sctl
       mode: release
 
     app:
@@ -49,7 +52,48 @@ data:
       api-key: ""
       api-key-file: /app/secrets/control/api-key
 
+    # Opt in after mounting RSA keys; see docs/authentication.md.
+    auth:
+      enabled: false
+      company:
+        enabled: false
+        issuer: ""
+        audience: ""
+        key-id: ""
+        public-key: ""
+        public-key-file: ""
+      pat:
+        enabled: false
+        issuer: k8s-ctl
+        audience: k8s-ctl
+        key-id: pat-v1
+        private-key-file: /app/secrets/auth/pat-private.pem
+        public-key-file: /app/secrets/auth/pat-public.pem
+        database-path: /data/auth.db
+
+
+    # Kubernetes MCP Server sidecar bridge; requires JWT/PAT and both write switches.
+    shell:
+      terminal:
+        idle-seconds: 300
+        lifetime-seconds: 1800
+        max-sessions: 16
+        max-per-user: 4
+      enabled: false
+      interceptor:
+        enabled: true
+        provider: allow-all
+    pod-exec:
+      enabled: false
+      mode: sidecar
+      binary: kubernetes-mcp-server
+      grants: []
+      endpoint: http://127.0.0.1:8082/mcp
+      allowed-namespaces: [] # Must explicitly list business namespaces before enabling.
+
+
     mcp:
+      diagnostics-only: false
       enabled: true
       write-enabled: true
 
@@ -143,6 +187,9 @@ spec:
             - name: control-key
               mountPath: /app/secrets/control
               readOnly: true
+            - name: auth-keys
+              mountPath: /app/secrets/auth
+              readOnly: true
             - name: catalog
               mountPath: /data
       volumes:
@@ -152,10 +199,16 @@ spec:
         - name: control-key
           secret:
             secretName: olixops-control
+            optional: true # Required by startup validation in legacy API-key mode only.
             defaultMode: 0440
             items:
               - key: api-key
                 path: api-key
+        - name: auth-keys
+          secret:
+            secretName: olixops-auth
+            optional: true # Legacy mode only; auth startup fails if enabled keys are missing.
+            defaultMode: 0440
         - name: catalog
           persistentVolumeClaim:
             claimName: olixops-catalog

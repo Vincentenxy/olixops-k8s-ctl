@@ -20,10 +20,11 @@ import (
 )
 
 type Client struct {
-	core      kubernetes.Interface
-	dynamic   dynamic.Interface
-	discovery discovery.DiscoveryInterface
-	context   string
+	restConfig *rest.Config
+	core       kubernetes.Interface
+	dynamic    dynamic.Interface
+	discovery  discovery.DiscoveryInterface
+	context    string
 }
 
 type ClusterStatus struct {
@@ -88,7 +89,7 @@ func New(cfg config.KubernetesConfig, provider kubeconfig.Provider) (*Client, er
 	if err != nil {
 		return nil, fmt.Errorf("create kubernetes discovery client: %w", err)
 	}
-	return &Client{core: core, dynamic: dynamicClient, discovery: discoveryClient, context: cfg.Kubeconfig.Context}, nil
+	return &Client{restConfig: rest.CopyConfig(restConfig), core: core, dynamic: dynamicClient, discovery: discoveryClient, context: cfg.Kubeconfig.Context}, nil
 }
 
 func buildRESTConfig(cfg config.KubernetesConfig, provider kubeconfig.Provider) (*rest.Config, error) {

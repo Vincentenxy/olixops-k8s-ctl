@@ -5,7 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
-	"fmt"
+	"olixops-k8s-ctl/internal/domain/fault"
 
 	"olixops-k8s-ctl/internal/domain"
 )
@@ -27,16 +27,28 @@ func (s *ClusterService) authorize(ctx context.Context, action string, write boo
 		return err
 	}
 	if write && !s.writeEnabled {
-		return fmt.Errorf("kubernetes write operations are disabled")
+		return fault.Disabled("kubernetes write operations are disabled")
 	}
 	request := domain.AuthorizationRequest{Cluster: s.cluster, Action: action, Write: write, Targets: targets}
 	if payload != nil {
 		data, err := json.Marshal(payload)
 		if err != nil {
-			return fmt.Errorf("encode authorization payload")
+			return fault.Invalid("encode authorization payload")
 		}
 		digest := sha256.Sum256(data)
 		request.PayloadDigest = hex.EncodeToString(digest[:])
 	}
-	return s.authorizer.Authorize(ctx, request)
+	if err := s.authorizer.Authorize(ctx, request); err != nil {
+		return &fault.Error{Reason: "forbidden", Message: "Operation rejected by authorization policy", Cause: err}
+	}
+	return nil
+}
+
+// WithClusterID fixes the instance identity used in all authorization requests.
+func WithClusterID(id string) ServiceOption {
+	return func(s *ClusterService) {
+		if id != "" {
+			s.cluster = id
+		}
+	}
 }

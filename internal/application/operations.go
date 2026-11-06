@@ -3,7 +3,7 @@ package application
 import (
 	"context"
 	"encoding/json"
-	"fmt"
+	"olixops-k8s-ctl/internal/domain/fault"
 	"regexp"
 	"strings"
 
@@ -28,20 +28,20 @@ func (s *ClusterService) resourceTarget(namespace, kind, name string) (domain.Ta
 	}
 	resource, ok := domain.LookupResource(kind)
 	if !ok {
-		return target, fmt.Errorf("unsupported resource kind")
+		return target, fault.Invalid("unsupported resource kind")
 	}
 	target.APIVersion = resource.Versions[0]
 	if resource.Group != "" {
 		target.APIVersion = resource.Group + "/" + target.APIVersion
 	}
 	if name != "" && len(validation.IsDNS1123Subdomain(name)) > 0 {
-		return target, fmt.Errorf("invalid resource name")
+		return target, fault.Invalid("invalid resource name")
 	}
 	return target, nil
 }
 func (s *ClusterService) namedTarget(namespace, kind, name string) (domain.Target, error) {
 	if name == "" {
-		return domain.Target{}, fmt.Errorf("name is required")
+		return domain.Target{}, fault.Invalid("name is required")
 	}
 	return s.resourceTarget(namespace, kind, name)
 }
@@ -58,20 +58,20 @@ func (s *ClusterService) GetResource(ctx context.Context, namespace, kind, name 
 
 func (s *ClusterService) GetResourceYAML(ctx context.Context, namespace, kind, name string) (clusterk8s.ResourceYAML, error) {
 	if kind == "Secret" {
-		return clusterk8s.ResourceYAML{}, fmt.Errorf("Secret YAML is not available")
+		return clusterk8s.ResourceYAML{}, fault.Forbidden("Secret YAML is not available")
 	}
 	var target domain.Target
 	var err error
 	if kind == "Namespace" {
 		if namespace != "" {
-			return clusterk8s.ResourceYAML{}, fmt.Errorf("Namespace is cluster-scoped and does not accept a namespace")
+			return clusterk8s.ResourceYAML{}, fault.Invalid("Namespace is cluster-scoped and does not accept a namespace")
 		}
 		if err := s.requireNamespace(name); err != nil {
 			return clusterk8s.ResourceYAML{}, err
 		}
 		target = domain.Target{Kind: kind, Namespace: name, Name: name}
 		if len(validation.IsDNS1123Label(name)) > 0 {
-			return clusterk8s.ResourceYAML{}, fmt.Errorf("invalid resource name")
+			return clusterk8s.ResourceYAML{}, fault.Invalid("invalid resource name")
 		}
 		err = s.authorize(ctx, "namespace.yaml.get", false, []domain.Target{target}, nil)
 	} else {
@@ -90,7 +90,7 @@ func pageLimit(limit int64) (int64, error) {
 		return 100, nil
 	}
 	if limit < 1 || limit > 200 {
-		return 0, fmt.Errorf("limit must be between 1 and 200")
+		return 0, fault.Invalid("limit must be between 1 and 200")
 	}
 	return limit, nil
 }
@@ -104,7 +104,7 @@ func (s *ClusterService) ListResourceObjects(ctx context.Context, namespace, kin
 		return clusterk8s.ResourcePage{}, err
 	}
 	if len(selector) > 1024 || len(token) > 8192 {
-		return clusterk8s.ResourcePage{}, fmt.Errorf("query parameter too long")
+		return clusterk8s.ResourcePage{}, fault.Invalid("query parameter too long")
 	}
 	if err := s.authorize(ctx, "resource.list", false, []domain.Target{target}, nil); err != nil {
 		return clusterk8s.ResourcePage{}, err
@@ -117,18 +117,18 @@ func (s *ClusterService) ListEvents(ctx context.Context, namespace, kind, name, 
 	}
 	if kind != "" {
 		if _, ok := domain.LookupResource(kind); !ok {
-			return clusterk8s.EventPage{}, fmt.Errorf("unsupported event resource kind")
+			return clusterk8s.EventPage{}, fault.Invalid("unsupported event resource kind")
 		}
 	}
 	if name != "" && len(validation.IsDNS1123Subdomain(name)) > 0 {
-		return clusterk8s.EventPage{}, fmt.Errorf("invalid resource name")
+		return clusterk8s.EventPage{}, fault.Invalid("invalid resource name")
 	}
 	limit, err := pageLimit(limit)
 	if err != nil {
 		return clusterk8s.EventPage{}, err
 	}
 	if len(token) > 8192 {
-		return clusterk8s.EventPage{}, fmt.Errorf("continue token too long")
+		return clusterk8s.EventPage{}, fault.Invalid("continue token too long")
 	}
 	if err := s.authorize(ctx, "event.list", false, []domain.Target{{Kind: kind, Namespace: namespace, Name: name}}, nil); err != nil {
 		return clusterk8s.EventPage{}, err
@@ -136,21 +136,31 @@ func (s *ClusterService) ListEvents(ctx context.Context, namespace, kind, name, 
 	return s.client.ListEvents(ctx, namespace, kind, name, token, limit)
 }
 func (s *ClusterService) GetPodLogs(ctx context.Context, options clusterk8s.LogOptions) (clusterk8s.PodLogs, error) {
+	grant, grantErr := s.diagnosticGrant(ctx, options.Namespace, options.Pod, options.Container, "logs", "")
+	if grantErr != nil {
+		return clusterk8s.PodLogs{}, grantErr
+	}
+
 	target, err := s.namedTarget(options.Namespace, "Pod", options.Pod)
 	if err != nil {
 		return clusterk8s.PodLogs{}, err
 	}
 	if options.Container != "" && len(validation.IsDNS1123Label(options.Container)) > 0 {
-		return clusterk8s.PodLogs{}, fmt.Errorf("invalid container name")
+		return clusterk8s.PodLogs{}, fault.Invalid("invalid container name")
 	}
 	if options.TailLines == 0 {
 		options.TailLines = 200
 	}
 	if options.TailLines < 1 || options.TailLines > 5000 || options.SinceSeconds < 0 || options.SinceSeconds > 604800 {
-		return clusterk8s.PodLogs{}, fmt.Errorf("invalid log bounds")
+		return clusterk8s.PodLogs{}, fault.Invalid("invalid log bounds")
 	}
 	if err := s.authorize(ctx, "pod.logs", false, []domain.Target{target}, nil); err != nil {
 		return clusterk8s.PodLogs{}, err
+	}
+	if grant != nil && grant.PodUID != "" {
+		if err := s.client.CheckDiagnosticPodUID(ctx, options.Namespace, options.Pod, grant.PodUID); err != nil {
+			return clusterk8s.PodLogs{}, err
+		}
 	}
 	return s.client.GetPodLogs(ctx, options)
 }
@@ -168,7 +178,7 @@ func workloadKind(kind string, scale bool) error {
 	if kind == "Deployment" || kind == "StatefulSet" || (!scale && kind == "DaemonSet") {
 		return nil
 	}
-	return fmt.Errorf("unsupported workload kind")
+	return fault.Invalid("unsupported workload kind")
 }
 func (s *ClusterService) ScaleWorkload(ctx context.Context, namespace, kind, name string, replicas int32) (clusterk8s.MutationResult, error) {
 	target, err := s.namedTarget(namespace, kind, name)
@@ -179,7 +189,7 @@ func (s *ClusterService) ScaleWorkload(ctx context.Context, namespace, kind, nam
 		return clusterk8s.MutationResult{}, err
 	}
 	if replicas < 0 || replicas > 10000 {
-		return clusterk8s.MutationResult{}, fmt.Errorf("replicas must be between 0 and 10000")
+		return clusterk8s.MutationResult{}, fault.Invalid("replicas must be between 0 and 10000")
 	}
 	if err := s.authorize(ctx, "workload.scale", true, []domain.Target{target}, replicas); err != nil {
 		return clusterk8s.MutationResult{}, err
@@ -208,13 +218,13 @@ func (s *ClusterService) RollbackWorkload(ctx context.Context, namespace, kind, 
 		return execctl.Result{}, err
 	}
 	if revision < 1 {
-		return execctl.Result{}, fmt.Errorf("an explicit positive revision is required")
+		return execctl.Result{}, fault.Invalid("an explicit positive revision is required")
 	}
 	if err := s.authorize(ctx, "workload.rollback", true, []domain.Target{target}, revision); err != nil {
 		return execctl.Result{}, err
 	}
 	if s.runner == nil {
-		return execctl.Result{}, fmt.Errorf("command runner is not configured")
+		return execctl.Result{}, fault.Disabled("command runner is not configured")
 	}
 	return s.runner.RollbackWorkload(ctx, namespace, kind, name, revision)
 }
@@ -224,16 +234,16 @@ func (s *ClusterService) UpdateConfigMap(ctx context.Context, namespace, name st
 		return clusterk8s.MutationResult{}, err
 	}
 	if len(data) == 0 {
-		return clusterk8s.MutationResult{}, fmt.Errorf("data must contain at least one key")
+		return clusterk8s.MutationResult{}, fault.Invalid("data must contain at least one key")
 	}
 	for key := range data {
 		if len(validation.IsConfigMapKey(key)) > 0 {
-			return clusterk8s.MutationResult{}, fmt.Errorf("invalid ConfigMap key")
+			return clusterk8s.MutationResult{}, fault.Invalid("invalid ConfigMap key")
 		}
 	}
 	encoded, _ := json.Marshal(data)
 	if len(encoded) > 1<<20 {
-		return clusterk8s.MutationResult{}, fmt.Errorf("ConfigMap data exceeds 1 MiB")
+		return clusterk8s.MutationResult{}, fault.Invalid("ConfigMap data exceeds 1 MiB")
 	}
 	if err := s.authorize(ctx, "configmap.update", true, []domain.Target{target}, data); err != nil {
 		return clusterk8s.MutationResult{}, err
@@ -254,7 +264,7 @@ func (s *ClusterService) DeleteNamespace(ctx context.Context, name string) (clus
 		return clusterk8s.MutationResult{}, err
 	}
 	if name == "default" || strings.HasPrefix(name, "kube-") {
-		return clusterk8s.MutationResult{}, fmt.Errorf("protected namespace cannot be deleted")
+		return clusterk8s.MutationResult{}, fault.Forbidden("protected namespace cannot be deleted")
 	}
 	if err := s.authorize(ctx, "namespace.delete", true, []domain.Target{{Kind: "Namespace", Name: name, Namespace: name}}, nil); err != nil {
 		return clusterk8s.MutationResult{}, err
@@ -268,7 +278,7 @@ func (s *ClusterService) UpdateNamespaceMetadata(ctx context.Context, name strin
 		return result, err
 	}
 	if len(changes.Labels) == 0 && len(changes.Annotations) == 0 && len(changes.RemoveLabels) == 0 && len(changes.RemoveAnnotations) == 0 {
-		return result, fmt.Errorf("at least one label or annotation change is required")
+		return result, fault.Invalid("at least one label or annotation change is required")
 	}
 	if err := validateNamespaceMetadata(changes); err != nil {
 		return result, err
@@ -283,34 +293,34 @@ func (s *ClusterService) UpdateNamespaceMetadata(ctx context.Context, name strin
 func validateNamespaceMetadata(changes NamespaceMetadataChanges) error {
 	for key, value := range changes.Labels {
 		if len(validation.IsQualifiedName(key)) > 0 {
-			return fmt.Errorf("invalid Namespace label key")
+			return fault.Invalid("invalid Namespace label key")
 		}
 		if len(validation.IsValidLabelValue(value)) > 0 {
-			return fmt.Errorf("invalid Namespace label value")
+			return fault.Invalid("invalid Namespace label value")
 		}
 	}
 	for key, value := range changes.Annotations {
 		if len(validation.IsQualifiedName(key)) > 0 {
-			return fmt.Errorf("invalid Namespace annotation key")
+			return fault.Invalid("invalid Namespace annotation key")
 		}
 		if len(value) > 256*1024 {
-			return fmt.Errorf("Namespace annotation value is too large")
+			return fault.Invalid("Namespace annotation value is too large")
 		}
 	}
 	for _, key := range changes.RemoveLabels {
 		if len(validation.IsQualifiedName(key)) > 0 {
-			return fmt.Errorf("invalid Namespace label key")
+			return fault.Invalid("invalid Namespace label key")
 		}
 		if _, ok := changes.Labels[key]; ok {
-			return fmt.Errorf("label cannot be set and removed in the same request")
+			return fault.Invalid("label cannot be set and removed in the same request")
 		}
 	}
 	for _, key := range changes.RemoveAnnotations {
 		if len(validation.IsQualifiedName(key)) > 0 {
-			return fmt.Errorf("invalid Namespace annotation key")
+			return fault.Invalid("invalid Namespace annotation key")
 		}
 		if _, ok := changes.Annotations[key]; ok {
-			return fmt.Errorf("annotation cannot be set and removed in the same request")
+			return fault.Invalid("annotation cannot be set and removed in the same request")
 		}
 	}
 	return nil
@@ -331,11 +341,11 @@ func (s *ClusterService) helmTarget(namespace, release string) (domain.Target, e
 			return target, err
 		}
 		if len(release) > 53 {
-			return target, fmt.Errorf("Helm release name exceeds 53 characters")
+			return target, fault.Invalid("Helm release name exceeds 53 characters")
 		}
 	}
 	if s.runner == nil {
-		return target, fmt.Errorf("command runner is not configured")
+		return target, fault.Disabled("command runner is not configured")
 	}
 	return target, nil
 }
@@ -346,7 +356,7 @@ func (s *ClusterService) ListHelmReleases(ctx context.Context, namespace string,
 	}
 	n, err := pageLimit(int64(limit))
 	if err != nil || offset < 0 {
-		return nil, fmt.Errorf("invalid Helm pagination")
+		return nil, fault.Invalid("invalid Helm pagination")
 	}
 	if err := s.authorize(ctx, "helm.list", false, []domain.Target{target}, nil); err != nil {
 		return nil, err
@@ -355,7 +365,7 @@ func (s *ClusterService) ListHelmReleases(ctx context.Context, namespace string,
 }
 func (s *ClusterService) GetHelmStatus(ctx context.Context, namespace, release string) (execctl.HelmRelease, error) {
 	if release == "" {
-		return execctl.HelmRelease{}, fmt.Errorf("release is required")
+		return execctl.HelmRelease{}, fault.Invalid("release is required")
 	}
 	target, err := s.helmTarget(namespace, release)
 	if err != nil {
@@ -368,7 +378,7 @@ func (s *ClusterService) GetHelmStatus(ctx context.Context, namespace, release s
 }
 func (s *ClusterService) GetHelmHistory(ctx context.Context, namespace, release string, limit int) ([]execctl.HelmRevision, error) {
 	if release == "" {
-		return nil, fmt.Errorf("release is required")
+		return nil, fault.Invalid("release is required")
 	}
 	target, err := s.helmTarget(namespace, release)
 	if err != nil {
@@ -398,20 +408,20 @@ func (s *ClusterService) helmValidator(ctx context.Context, action string, relea
 }
 func (s *ClusterService) UpgradeHelm(ctx context.Context, input HelmUpgradeInput) (execctl.Result, error) {
 	if input.Release == "" {
-		return execctl.Result{}, fmt.Errorf("release is required")
+		return execctl.Result{}, fault.Invalid("release is required")
 	}
 	target, err := s.helmTarget(input.Namespace, input.Release)
 	if err != nil {
 		return execctl.Result{}, err
 	}
 	if len(input.Chart) > 512 || !chartPattern.MatchString(input.Chart) || strings.Contains(input.Chart, "..") {
-		return execctl.Result{}, fmt.Errorf("chart must be repo/name or oci://registry/path; local paths and arbitrary URLs are not accepted")
+		return execctl.Result{}, fault.Invalid("chart must be repo/name or oci://registry/path; local paths and arbitrary URLs are not accepted")
 	}
 	if input.Version != "" && !versionPattern.MatchString(input.Version) {
-		return execctl.Result{}, fmt.Errorf("invalid chart version")
+		return execctl.Result{}, fault.Invalid("invalid chart version")
 	}
 	if len(input.ValuesYAML) > 2<<20 {
-		return execctl.Result{}, fmt.Errorf("values exceeds 2 MiB")
+		return execctl.Result{}, fault.Invalid("values exceeds 2 MiB")
 	}
 	if err := s.authorize(ctx, "helm.upgrade", true, []domain.Target{target}, input); err != nil {
 		return execctl.Result{}, err
@@ -420,7 +430,7 @@ func (s *ClusterService) UpgradeHelm(ctx context.Context, input HelmUpgradeInput
 }
 func (s *ClusterService) RollbackHelm(ctx context.Context, namespace, release string, revision int, wait bool) (execctl.Result, error) {
 	if release == "" || revision < 1 {
-		return execctl.Result{}, fmt.Errorf("release and a positive revision are required")
+		return execctl.Result{}, fault.Invalid("release and a positive revision are required")
 	}
 	target, err := s.helmTarget(namespace, release)
 	if err != nil {
@@ -433,7 +443,7 @@ func (s *ClusterService) RollbackHelm(ctx context.Context, namespace, release st
 }
 func (s *ClusterService) UninstallHelm(ctx context.Context, namespace, release string, wait bool) (execctl.Result, error) {
 	if release == "" {
-		return execctl.Result{}, fmt.Errorf("release is required")
+		return execctl.Result{}, fault.Invalid("release is required")
 	}
 	target, err := s.helmTarget(namespace, release)
 	if err != nil {
@@ -458,7 +468,7 @@ func (s *ClusterService) GetWorkloadHistory(ctx context.Context, namespace, kind
 		return clusterk8s.WorkloadHistory{}, err
 	}
 	if len(token) > 8192 {
-		return clusterk8s.WorkloadHistory{}, fmt.Errorf("continue token too long")
+		return clusterk8s.WorkloadHistory{}, fault.Invalid("continue token too long")
 	}
 	if err := s.authorize(ctx, "workload.history", false, []domain.Target{target}, nil); err != nil {
 		return clusterk8s.WorkloadHistory{}, err

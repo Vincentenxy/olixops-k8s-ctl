@@ -1,0 +1,57 @@
+# Copy to a directory as config.yaml and start with --config-dir <directory>.
+# Mount the trusted upper platform public key; this file contains no credentials.
+app:
+  name: k8s-ctl
+  version: 0.2.0
+server:
+  host: 0.0.0.0
+  port: 8080
+  mode: release
+  public-url: https://operator.internal.example/k8sctl
+http:
+  enabled: true
+mcp:
+  enabled: false
+  write-enabled: false
+  diagnostics-only: false
+cluster:
+  id: poc
+auth:
+  enabled: true
+  company:
+    enabled: true
+    issuer: upper-platform
+    audience: k8s-ctl:poc
+    key-id: platform-v1
+    public-key-file: /var/run/k8s-ctl-auth/platform-public.pem
+  pat:
+    enabled: false
+kubernetes:
+  in-cluster: true
+  write-enabled: true
+  allowed-namespaces: [developer-demo]
+  command-timeout-seconds: 120
+  kubectl: kubectl
+  helm: helm
+  kubeconfig:
+    source: file # in-cluster=true selects the ServiceAccount Provider at startup.
+# Existing private Kubernetes MCP execution sidecar, not the external main MCP.
+pod-exec:
+  enabled: true
+  mode: sidecar
+  endpoint: http://127.0.0.1:8082/mcp
+  allowed-namespaces: [developer-demo]
+  grants:
+    - user-id: developer-example
+      namespace: developer-demo
+      pod: app-example
+      container: app
+      actions: [shell, logs, download_file, upload_file]
+shell:
+  enabled: true
+  interceptor:
+    enabled: true
+    provider: allow-all
+catalog:
+  enabled: false
+  cluster: poc

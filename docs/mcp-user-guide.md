@@ -1,5 +1,13 @@
 # k8s-ctl PoC MCP 使用指南
 
+> 2026-11-06 双入口更新：主 MCP 现有业务工具均有认证 HTTP 对应入口，终端及文件准备接口已补齐；关闭主 MCP 后仍可作为 HTTP 操作器使用。共享契约、最新开关和调用示例见 [HTTP 操作器指南](http-operator-guide.md)，上层多集群路由仍待实现。
+
+> 主认证 MCP 现已支持单次 Shell、持续终端会话和容器文件下载，见 [Shell MCP 使用说明](shell-mcp.md)。这些能力需显式开启 Shell，使用主模式，不使用诊断专用模式。
+
+> **本轮日志与容器诊断手动测试请从 [MCP 接入与手动测试](mcp-manual-testing.md) 开始。** 该文提供本地配置、PAT 和 Codex 导入步骤。下面的公开地址与完整管理工具清单属于旧兼容模式，不适用于开发人员诊断专用实例。
+
+> 2026-11-06 认证更新：已实现可选公司 JWT/PAT 认证。`auth.enabled=true` 时业务接口需要 Bearer，MCP 改为 `/api/v1/mcp`（Higress 下加 `/k8sctl`），旧 `/api/v1/pub/mcp` 不注册。本文原公开入口/API key 或待实现认证描述仅适用于旧兼容模式；资源级授权仍待实现。配置、令牌接口与迁移见 [认证接入说明](authentication.md)。
+
 更新日期：2026-10-26。适用于通过 MCP 客户端或程序调用 Kubernetes 控制服务的 PoC 使用方。
 
 ## 1. 服务地址
@@ -529,3 +537,21 @@ Helm 的 `chart` 接受已配置仓库的 `repo/chart` 或 `oci://registry/path`
 ```
 
 上文“2026-10-26 真实环境验证”的 48 工具结果属于升级前线上版本，不能作为新增工具或七类服务真实运行的验收证据。新增模板/入口已做自动化测试；仍需在目标集群升级并验证镜像、存储和协议访问。
+
+
+## 可选的容器诊断桥接
+
+Kubernetes MCP Server v0.1.2 的私有 sidecar 接入、`exec_pod_command`、REST 日志/执行入口及配置/RBAC 见 [接入说明](kubernetes-mcp-integration.md)。默认关闭，启用后在原有工具集上增加一个写工具；已有 `get_pod_logs` 复用，不重复注册上游工具。客户端继续使用 k8s-ctl 的 JWT/PAT 认证入口，不直连 sidecar。
+
+
+开发人员使用的两个诊断工具、按用户精确授权、managed 本地 MCP 验证和文件读取新增边界，见 [开发人员 MCP 诊断](developer-diagnostics.md)。该模式与完整管理工具集分开部署。
+
+
+## 容器文件保存到开发人员本地
+
+使用同一个主 MCP 的 `download_pod_file(namespace, pod, container, path)` 准备下载，工具返回 downloadId、downloadUrl、method、name、expiresAt、podUID；随后由本地智能体或客户端用个人 PAT 调用 `POST /api/v1/cluster/pods/files/download`，JSON 请求体为 `{"downloadId":"..."}`，用 curl 保存原始二进制文件。成功响应是文件流，开始传输前错误仍使用统一 JSON envelope。
+
+下载不设固定大小上限，引用 5 分钟有效、用户绑定、一次使用；不支持 Range/断点续传。目标容器需要 tar，可读取 ConfigMap 符号链接指向的普通文件；无需 Perl 或客户端 kubeconfig。部署经过 Higress `/k8sctl` 时，在配置文件设置 server.public-url 为实际外部地址并保留此前缀。curl 完整示例及本地辅助客户端见 [Shell MCP 使用说明](shell-mcp.md)，并发、大文件等后续事项见 [开发待办](roadmap.md)。
+
+
+上传使用主 MCP 的 `upload_pod_file(namespace,pod,container,path)` 准备，然后 curl 携带 PAT、`Content-Type: application/octet-stream`、`X-Upload-Id`，向返回的 uploadUrl 执行 POST，`--data-binary @本地文件`。首版只创建新文件，父目录必须已有且可写；不覆盖已有内容、不自动 reload。成功返回统一 JSON（path、size、sha256、podUID）。grants 非空时需独立 `upload_file` 动作。完整示例与失败语义见 [Shell MCP 使用说明](shell-mcp.md)。

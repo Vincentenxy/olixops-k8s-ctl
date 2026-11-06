@@ -144,7 +144,7 @@ func TestCatalogHTTPMCPParityAndWriteDiscovery(t *testing.T) {
 				}
 				require.NoError(t, json.NewDecoder(missingResp.Body).Decode(&missingEnvelope))
 				missingResp.Body.Close()
-				require.Equal(t, "MISSING_NAMESPACE", missingEnvelope.Data.Reason)
+				require.Equal(t, "invalid_argument", missingEnvelope.Data.Reason)
 				require.NoError(t, store.View(ctx, func(st *d.State) error {
 					require.Empty(t, st.Instances)
 					require.Empty(t, st.Revisions)

@@ -3,6 +3,7 @@
 server:
   host: 0.0.0.0
   port: 8091
+  public-url: https://efficient-lab.qiuer.net/k8sctl
   mode: release
 
 app:
@@ -26,7 +27,36 @@ control:
   api-key: ""
   api-key-file: /app/secrets/control/api-key
 
+# Opt in after mounting RSA keys; see docs/authentication.md.
+auth:
+  enabled: false
+  company:
+    enabled: false
+    issuer: ""
+    audience: ""
+    key-id: ""
+    public-key: ""
+    public-key-file: ""
+  pat:
+    enabled: false
+    issuer: k8s-ctl
+    audience: k8s-ctl
+    key-id: pat-v1
+    private-key-file: /app/secrets/auth/pat-private.pem
+    public-key-file: /app/secrets/auth/pat-public.pem
+    database-path: /data/auth.db
+
+# Kubernetes MCP Server sidecar bridge; requires JWT/PAT, Kubernetes writes and an HTTP or writable MCP entry.
+pod-exec:
+  enabled: false
+  mode: sidecar # managed is available for server-side local MCP verification.
+  binary: kubernetes-mcp-server
+  grants: [] # Exact user / Pod UID / action / file grants; see diagnostics example.
+  endpoint: http://127.0.0.1:8082/mcp
+  allowed-namespaces: [] # Must explicitly list business namespaces before enabling.
+
 mcp:
+  diagnostics-only: false # Enable for developer-facing log/exec-only service.
   enabled: true
   write-enabled: true
 
@@ -43,3 +73,19 @@ catalog:
   gateway-name: higress-tcp-gateway
   port-start: 30000
   port-end: 30200
+
+# Single-command shell through authenticated HTTP / main MCP; allow-all is a placeholder.
+shell:
+  terminal:
+    idle-seconds: 300
+    lifetime-seconds: 1800
+    max-sessions: 16
+    max-per-user: 4
+  enabled: false
+  interceptor:
+    enabled: true
+    provider: allow-all
+
+# Ordinary HTTP operations; file streams remain available to enabled MCP tools.
+http:
+  enabled: true
