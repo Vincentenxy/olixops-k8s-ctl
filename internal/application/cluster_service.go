@@ -14,8 +14,9 @@ import (
 )
 
 type ClusterService struct {
-	uploads                 uploads
-	downloads               downloads
+	uploads                 ticketStore
+	downloads               ticketStore
+	transferBaseURL         string
 	terminals               *sessions.Manager
 	streamBackend           domain.PodStreamBackend
 	shellEnabled            bool

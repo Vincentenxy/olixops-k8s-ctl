@@ -9,7 +9,6 @@ import (
 	"path"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -17,11 +16,6 @@ import (
 )
 
 const UploadRoute = "/api/v1/cluster/pods/files/upload"
-
-type uploads struct {
-	sync.Mutex
-	tickets map[string]downloadTicket
-}
 
 // UploadPodFile prepares metadata only. Raw bytes arrive on the authenticated HTTP route.
 func (s *ClusterService) UploadPodFile(ctx context.Context, in domain.UploadInput) (domain.UploadOutput, error) {
@@ -39,24 +33,11 @@ func (s *ClusterService) UploadPodFile(ctx context.Context, in domain.UploadInpu
 	if err = s.shellCheck(ctx, owner, t, "file.upload.prepare", "", in.Path); err != nil {
 		return domain.UploadOutput{}, err
 	}
-	s.uploads.Lock()
-	defer s.uploads.Unlock()
-	if s.uploads.tickets == nil {
-		s.uploads.tickets = map[string]downloadTicket{}
+	id, ticket, err := s.uploads.prepare(owner, t, in.Path)
+	if err != nil {
+		return domain.UploadOutput{}, err
 	}
-	now := time.Now()
-	for id, ticket := range s.uploads.tickets {
-		if !now.Before(ticket.Expires) {
-			delete(s.uploads.tickets, id)
-		}
-	}
-	if len(s.uploads.tickets) >= 4096 {
-		return domain.UploadOutput{}, fault.Conflict("too many prepared upload references")
-	}
-	id := uuid.NewString()
-	expires := now.Add(5 * time.Minute)
-	s.uploads.tickets[id] = downloadTicket{Owner: owner, Target: t, Path: in.Path, Expires: expires}
-	return domain.UploadOutput{UploadID: id, UploadURL: s.downloads.baseURL + UploadRoute, Method: "POST", Path: in.Path, ExpiresAt: expires.UTC().Format(time.RFC3339), PodUID: t.UID}, nil
+	return domain.UploadOutput{UploadID: id, UploadURL: s.transferBaseURL + UploadRoute, Method: "POST", Path: in.Path, ExpiresAt: ticket.Expires.UTC().Format(time.RFC3339), PodUID: t.UID}, nil
 }
 
 // Fixed scripts run inside the target container; caller paths are separate argv.
@@ -66,7 +47,7 @@ const uploadReceive = `head -c "$3" > "$1/$2" && test "$(wc -c < "$1/$2")" -eq "
 const uploadCommit = `ln "$1/$3" "$2/"`
 const uploadCleanup = `rm -f "$1/$2" && rmdir "$1"`
 
-// ReceivePodFile owns body and closes it to unblock a producer after stream failure.
+// ReceivePodFile owns body; its transport adapter must make Close interrupt a blocked Read.
 // No whole-file buffering, local subprocess, or caller-supplied shell command is used.
 func (s *ClusterService) ReceivePodFile(ctx context.Context, id string, body io.ReadCloser, size int64) (domain.UploadResult, error) {
 	defer body.Close()
@@ -77,11 +58,9 @@ func (s *ClusterService) ReceivePodFile(ctx context.Context, id string, body io.
 	if err != nil {
 		return domain.UploadResult{}, err
 	}
-	s.uploads.Lock()
-	ticket, ok := s.uploads.tickets[id]
-	s.uploads.Unlock()
-	if !ok || ticket.Owner != owner || !time.Now().Before(ticket.Expires) {
-		return domain.UploadResult{}, fault.NotFound("upload reference unavailable or expired")
+	ticket, err := s.uploads.inspect(owner, id)
+	if err != nil {
+		return domain.UploadResult{}, err
 	}
 	t, err := s.shellTarget(ctx, ticket.Target.TerminalTarget, "upload_file")
 	if err != nil {
@@ -93,14 +72,8 @@ func (s *ClusterService) ReceivePodFile(ctx context.Context, id string, body io.
 	if err = s.shellCheck(ctx, owner, t, "file.upload", id, ticket.Path); err != nil {
 		return domain.UploadResult{}, err
 	}
-	s.uploads.Lock()
-	_, ok = s.uploads.tickets[id]
-	if ok {
-		delete(s.uploads.tickets, id)
-	}
-	s.uploads.Unlock()
-	if !ok {
-		return domain.UploadResult{}, fault.Conflict("upload reference already consumed")
+	if err = s.uploads.consume(owner, id); err != nil {
+		return domain.UploadResult{}, err
 	}
 	stage := path.Join(path.Dir(ticket.Path), ".k8s-ctl-upload-"+uuid.NewString())
 	// Cleanup is best effort: an unavailable/replaced Pod or revoked grant must not be bypassed.

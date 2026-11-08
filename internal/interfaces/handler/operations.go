@@ -1,11 +1,11 @@
 package handler
 
 import (
+	"bytes"
 	"context"
 	"github.com/gin-gonic/gin"
-	"net/http"
 	"olixops-k8s-ctl/internal/application/api"
-	"olixops-k8s-ctl/internal/domain"
+	"olixops-k8s-ctl/internal/interfaces/httpio"
 	"olixops-k8s-ctl/pkg/response"
 	"time"
 )
@@ -13,14 +13,14 @@ import (
 // operation binds HTTP's protocol envelope only. Typed use cases are also used by MCP.
 func operation[In, Out any](timeout time.Duration, call func(context.Context, In) (Out, error)) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, api.MaxJSONBytes)
-		in, err := api.Decode[In](c.Request.Body)
+		ctx, cancel := context.WithTimeout(c.Request.Context(), timeout)
+		defer cancel()
+		c.Request = c.Request.WithContext(ctx)
+		in, err := decodeJSON[In](c)
 		if err != nil {
 			operationResult(c, nil, err)
 			return
 		}
-		ctx, cancel := context.WithTimeout(c.Request.Context(), timeout)
-		defer cancel()
 		out, err := call(ctx, in)
 		operationResult(c, out, err)
 	}
@@ -82,14 +82,7 @@ func RegisterOperations(v1 *gin.RouterGroup, service api.Service, writeTimeout t
 	}
 }
 
-type TerminalOperations interface {
-	OpenPodTerminal(context.Context, domain.TerminalOpenInput) (domain.TerminalResult, error)
-	WritePodTerminal(context.Context, domain.TerminalWriteInput) (domain.TerminalResult, error)
-	ReadPodTerminal(context.Context, domain.TerminalReadInput) (domain.TerminalResult, error)
-	ClosePodTerminal(context.Context, domain.TerminalSessionInput) (domain.TerminalResult, error)
-	DownloadPodFile(context.Context, domain.DownloadInput) (domain.DownloadOutput, error)
-	UploadPodFile(context.Context, domain.UploadInput) (domain.UploadOutput, error)
-}
+type TerminalOperations = api.TerminalService
 
 func RegisterTerminals(v1 *gin.RouterGroup, s TerminalOperations) {
 	terminals := v1.Group("/cluster/pods/terminals")
@@ -104,4 +97,13 @@ func RegisterTerminals(v1 *gin.RouterGroup, s TerminalOperations) {
 		files.POST("/prepare-download", operation(api.ShellTimeout, s.DownloadPodFile))
 		files.POST("/prepare-upload", operation(api.ShellTimeout, s.UploadPodFile))
 	}
+}
+
+func decodeJSON[In any](c *gin.Context) (In, error) {
+	raw, err := httpio.ReadJSONBody(c.Writer, c.Request, api.MaxJSONBytes)
+	if err != nil {
+		var zero In
+		return zero, err
+	}
+	return api.Decode[In](bytes.NewReader(raw))
 }

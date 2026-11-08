@@ -220,3 +220,38 @@ func TestCatalogHTTPMCPParityAndWriteDiscovery(t *testing.T) {
 		})
 	}
 }
+
+func TestCatalogHTTPErrorStatuses(t *testing.T) {
+	ctx := context.Background()
+	store, err := catalogdb.Open(filepath.Join(t.TempDir(), "catalog.db"))
+	require.NoError(t, err)
+	defer store.Close()
+	catalog, err := app.New(ctx, store, catalogReadCluster{}, d.Gateway{ID: "test", Cluster: "test", Namespace: "demo", Name: "gateway", Service: "gateway", PortStart: 30000, PortEnd: 30001}, nil)
+	require.NoError(t, err)
+	cfg := &config.Config{Server: config.ServerConfig{Mode: "test"}, Control: config.ControlConfig{APIKey: "test-key"}}
+	engine, err := router.NewWithCatalog(cfg, application.NewClusterService(nil, nil, cfg.Kubernetes), catalog)
+	require.NoError(t, err)
+	in := app.SaveConfigInput{OwnerID: "alice", Name: "cache", Namespace: "demo", Software: "redis", TemplateVersion: 1, Parameters: d.Parameters{StorageClass: "standard", SecretName: "redis-auth", SecretKey: "password"}, RequestID: "initial"}
+	saved, err := catalog.SaveConfig(ctx, in)
+	require.NoError(t, err)
+	in.InstanceID = saved.Instance.ID
+	in.ExpectedRevision = 0
+	in.RequestID = "stale"
+	data, err := json.Marshal(in)
+	require.NoError(t, err)
+	for _, tc := range []struct {
+		path, body, reason string
+		status             int
+	}{
+		{"/api/v1/templates/get", `{"software":"redis","version":9999}`, "NOT_FOUND", 404},
+		{"/api/v1/services/get", `{"instanceId":"missing"}`, "NOT_FOUND", 404},
+		{"/api/v1/services/save-config", string(data), "REVISION_CONFLICT", 409},
+	} {
+		req := httptest.NewRequest("POST", tc.path, strings.NewReader(tc.body))
+		req.Header.Set("X-Olixops-Control-Key", "test-key")
+		out := httptest.NewRecorder()
+		engine.ServeHTTP(out, req)
+		require.Equal(t, tc.status, out.Code, out.Body.String())
+		require.Contains(t, out.Body.String(), `"reason":"`+tc.reason+`"`)
+	}
+}

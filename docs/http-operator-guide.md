@@ -109,12 +109,20 @@ curl --fail-with-body "$DOWNLOAD_URL" \
 
 常见 reason：invalid_argument、unauthenticated、forbidden、not_found、conflict、feature_disabled、upstream_unavailable、deadline_exceeded、canceled、execution_unknown。Shell 拦截器保留其专用原因码，Catalog 保留已有业务原因码。认证失败、路由不存在等前置中间件错误也提供 data.reason。不得把底层原始报错或凭据返回给调用方。
 
-未找到或跨用户的会话/文件引用返回 404；Pod 被替换等冲突返回 409；拒绝/功能关闭返回 403。部分旧接口过去统一返回 400，客户端应改为检查 HTTP 状态与 data.reason。命令失败时 data.result 保留执行状态；MCP 对应 isError 和同一原因说明。不要仅按 HTTP 200 或 Go err=nil 判断执行成功。
+未找到或跨用户的会话/文件引用返回 404；Pod 被替换等冲突返回 409；拒绝/功能关闭返回 403。Catalog 的 `NOT_FOUND` 返回 404，`REVISION_CONFLICT`、端口占用等状态冲突返回 409，`DEPLOYMENT_RESULT_UNKNOWN` / `DELETE_PENDING` 返回 502，网关或依赖资源不可用返回 503；业务原因码保持原有大写形式，参数错误仍返回 400。部分旧接口过去统一返回 400，客户端应改为检查 HTTP 状态与 data.reason。命令失败时 data.result 保留执行状态；MCP 对应 isError 和同一原因说明。不要仅按 HTTP 200 或 Go err=nil 判断执行成功。
 
 普通 JSON 请求上限 4 MiB，另有各业务字段限制。MCP JSON-RPC 外层也有 4 MiB 上限；接近上限的 JSON 应为协议封装预留空间。查询预算 30 秒，写操作使用 command-timeout-seconds（默认 120 秒），exec/终端准备 35 秒；终端 read 最多等待 5 秒。文件字节流不使用普通 JSON 大小限制或统一短总超时。
+
+HTTP 和 MCP 的普通 JSON 请求体必须在 10 秒内读完；如果 HTTP 操作预算或上游 context 更早到期，则使用更早的截止时间。该限制直接作用于网络读取，避免客户端只发送部分 JSON 后长期占用处理协程；读取完成即清除网络读截止时间，不占用后续文件传输预算，也不破坏正常连接复用。MCP 的请求仍由 SDK 解析 JSON-RPC，读取失败返回 JSON-RPC 错误结构。
+
+终端输入按会话串行写入；排队期间取消或超时会及时退出，尚未执行的输入不会关闭其他请求正在使用的会话。上传接收端提前失败时，HTTP 适配器会打断未完成的客户端上传读取，随后进入原有远端暂存文件清理流程；清理仍受 Pod 可达性与授权约束，不能保证故障 Pod 上的清理一定成功。上传、下载继续分别保存单次引用，共用用户、有效期与原子消费校验，执行前会再次确认引用没有过期。
+
+kubectl/Helm 只读命令或写入前检查超时返回 504 / `deadline_exceeded`。已经启动的变更命令被超时或取消中断，返回 502 / `execution_unknown`，因为 Kubernetes 可能已经收到变更；客户端应先查询实际状态，不能据此自动重试。底层错误保留 context 原因供调用者判断，不回传命令参数或 stderr。
 
 ## 文档与验收
 
 执行 `go run ./cmd/api-docs` 可重建覆盖矩阵和 OpenAPI，命令只使用临时 SQLite 与本机协议端点，不加载 kubeconfig、不访问 Kubernetes。57 个工具与 HTTP 实际路由的对应由测试核对，新增工具必须同步对照表。
 
 验证范围、真实集群操作、清理结果及限制见 [双入口测试记录](testing/http-operator-2026-11-06.md)。
+
+本轮边界修复与并发回归见 [代码审核修复测试记录](testing/review-fixes-2026-11-07.md)。

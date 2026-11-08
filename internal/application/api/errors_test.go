@@ -7,6 +7,7 @@ import (
 	kerrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"olixops-k8s-ctl/internal/domain"
+	catalog "olixops-k8s-ctl/internal/domain/catalog"
 	"olixops-k8s-ctl/internal/domain/fault"
 	"testing"
 )
@@ -17,6 +18,9 @@ func TestStableErrorReasons(t *testing.T) {
 		reason string
 		status int
 	}{
+		{catalog.Fail("NOT_FOUND", "not found"), "NOT_FOUND", 404},
+		{catalog.Fail("REVISION_CONFLICT", "revision conflict"), "REVISION_CONFLICT", 409},
+		{catalog.Fail("DEPLOYMENT_RESULT_UNKNOWN", "unknown"), "DEPLOYMENT_RESULT_UNKNOWN", 502},
 		{fault.Invalid("bad name"), "invalid_argument", 400},
 		{fault.Forbidden("blocked"), "forbidden", 403},
 		{context.DeadlineExceeded, "deadline_exceeded", 504},

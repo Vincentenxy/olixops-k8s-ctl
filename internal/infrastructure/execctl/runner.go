@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"time"
 
+	"olixops-k8s-ctl/internal/domain/fault"
 	"olixops-k8s-ctl/internal/infrastructure/kubeconfig"
 )
 
@@ -59,7 +60,7 @@ func (r *Runner) KubectlApply(ctx context.Context, manifest, namespace string, s
 	if dryRun {
 		args = append(args, "--dry-run=server")
 	}
-	_, err = r.runRaw(ctx, r.cfg.Kubectl, args, []byte(manifest))
+	_, err = r.runRaw(ctx, r.cfg.Kubectl, args, []byte(manifest), !dryRun)
 	if err != nil {
 		return Result{}, err
 	}
@@ -127,9 +128,12 @@ func (b *cappedBuffer) Write(p []byte) (int, error) {
 	return n, nil
 }
 
-func (r *Runner) runRaw(parent context.Context, binary string, args []string, stdin []byte) ([]byte, error) {
+func (r *Runner) runRaw(parent context.Context, binary string, args []string, stdin []byte, mutating bool) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(parent, time.Duration(r.cfg.TimeoutSeconds)*time.Second)
 	defer cancel()
+	if err := ctx.Err(); err != nil {
+		return nil, commandContextError(err, false)
+	}
 	command := exec.CommandContext(ctx, binary, args...)
 	command.WaitDelay = time.Second
 	if stdin != nil {
@@ -139,14 +143,33 @@ func (r *Runner) runRaw(parent context.Context, binary string, args []string, st
 	command.Stdout = output
 	// stderr can contain credentials, rendered values or server addresses.
 	command.Stderr = io.Discard
-	if err := command.Run(); err != nil {
-		if ctx.Err() != nil {
-			return nil, fmt.Errorf("command timed out or was canceled")
+	if err := command.Start(); err != nil {
+		if cause := ctx.Err(); cause != nil {
+			return nil, commandContextError(cause, false)
 		}
-		return nil, fmt.Errorf("external command failed")
+		return nil, fault.Unavailable("external command could not start")
+	}
+	if err := command.Wait(); err != nil {
+		if cause := ctx.Err(); cause != nil {
+			return nil, commandContextError(cause, mutating)
+		}
+		return nil, fault.Unavailable("external command failed")
 	}
 	if output.overflow {
 		return nil, fmt.Errorf("command output exceeds 8 MiB")
 	}
 	return output.Bytes(), nil
+}
+
+// Preserve cancellation causes without exposing subprocess stderr or arguments.
+// A started mutation may have reached Kubernetes before the local CLI was killed.
+func commandContextError(cause error, mutationStarted bool) error {
+	reason, message := "canceled", "Command canceled before mutation; no retry was attempted"
+	if cause == context.DeadlineExceeded {
+		reason, message = "deadline_exceeded", "Command deadline exceeded before mutation; no retry was attempted"
+	}
+	if mutationStarted {
+		reason, message = "execution_unknown", "Command interrupted after mutation started; inspect cluster state before retrying"
+	}
+	return &fault.Error{Reason: reason, Message: message, Cause: cause}
 }

@@ -687,6 +687,7 @@ func TestExternalCommandCancellation(t *testing.T) {
 	defer cancel()
 	start := time.Now()
 	_, err := f.service.GetHelmStatus(ctx, "demo", "web")
-	require.Error(t, err)
+	require.ErrorIs(t, err, context.DeadlineExceeded)
+	require.Equal(t, "deadline_exceeded", contract.Classify(err).Reason)
 	require.Less(t, time.Since(start), 2*time.Second, "canceling a tool must terminate its CLI process")
 }

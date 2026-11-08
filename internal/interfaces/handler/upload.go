@@ -2,6 +2,7 @@ package handler
 
 import (
 	"mime"
+	"olixops-k8s-ctl/internal/interfaces/httpio"
 
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
@@ -19,7 +20,9 @@ func RegisterPodFileUpload(v1 *gin.RouterGroup, s *application.ClusterService) {
 			response.AbortWithHTTPStatus(c, 400)
 			return
 		}
-		out, err := s.ReceivePodFile(c.Request.Context(), c.GetHeader("X-Upload-Id"), c.Request.Body, c.Request.ContentLength)
+		body := httpio.InterruptibleBody(c.Writer, c.Request)
+		defer body.Close()
+		out, err := s.ReceivePodFile(c.Request.Context(), c.GetHeader("X-Upload-Id"), body, c.Request.ContentLength)
 		logger.Info(c.Request.Context(), "pod file upload", zap.Int64("bytes", out.Size), zap.Bool("success", err == nil))
 		if err != nil {
 			operationResult(c, nil, err)

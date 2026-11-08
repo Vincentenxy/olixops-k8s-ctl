@@ -83,7 +83,7 @@ func NewHandler(service Service, version string, options ...Options) http.Handle
 		JSONResponse:        true,
 		MaxRequestBodyBytes: 4 << 20,
 	})
-	return http.NewCrossOriginProtection().Handler(transport)
+	return http.NewCrossOriginProtection().Handler(boundJSONBody(transport))
 }
 
 func register[In, Out any](server *mcp.Server, name, description string, call func(context.Context, In) (Out, error)) {

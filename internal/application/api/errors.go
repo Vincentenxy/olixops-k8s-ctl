@@ -24,6 +24,8 @@ func Classify(err error) Failure {
 	var rejected *interceptor.Rejection
 	var business *catalog.Error
 	switch {
+	case errors.As(err, &f) && f.Reason == "execution_unknown":
+		return Failure{f.Reason, f.Message, 502}
 	case errors.Is(err, context.DeadlineExceeded):
 		return Failure{"deadline_exceeded", "Operation deadline exceeded; a write may already have taken effect", 504}
 	case errors.Is(err, context.Canceled):
@@ -51,7 +53,7 @@ func Classify(err error) Failure {
 	case kerrors.IsTimeout(err), kerrors.IsServerTimeout(err):
 		return Failure{"deadline_exceeded", "Kubernetes operation timed out; result may be unknown", 504}
 	case errors.As(err, &business):
-		return Failure{business.Code, business.Message, 400}
+		return Failure{business.Code, business.Message, catalogStatus(business.Code)}
 	default:
 		return Failure{"upstream_unavailable", "Operation failed; check backend availability and request ID", 503}
 	}
@@ -74,4 +76,29 @@ func ExecFailure(out domain.PodExecOutput, err error) error {
 		return fault.Unknown("Command returned an upstream error; inspect the execution result")
 	}
 	return nil
+}
+
+// Catalog reason codes remain compatible; protocol status reflects their meaning.
+func catalogStatus(reason string) int {
+	switch reason {
+	case "NOT_FOUND":
+		return 404
+	case "RESOURCE_DELETE_FORBIDDEN", "STORAGE_SHRINK_FORBIDDEN":
+		return 403
+	case "REVISION_CONFLICT", "IDEMPOTENCY_CONFLICT", "TEMPLATE_VERSION_EXISTS",
+		"INSTANCE_DELETED", "INSTANCE_IDENTITY_CONFLICT", "INSTANCE_PORT_ALREADY_RESERVED",
+		"PORT_IN_USE", "PORT_POOL_EXHAUSTED", "PORT_RESERVATION_LOST", "PORT_CHANGE_REQUIRES_DELETE",
+		"PORT_NOT_RECONCILED", "DEPLOYMENT_ACTIVE", "DEPLOYMENT_INACTIVE", "DEPLOYMENT_SUPERSEDED",
+		"RESOURCE_IDENTITY_CONFLICT", "RESOURCE_IDENTITY_MISSING", "RESOURCE_OWNERSHIP_CONFLICT",
+		"NAMESPACE_TERMINATING", "SANDBOX_EXPIRED", "IMAGE_CHANGE_REQUIRES_MIGRATION", "IMMUTABLE_PARAMETER",
+		"ARTIFACT_DIGEST_MISMATCH":
+		return 409
+	case "DEPLOYMENT_RESULT_UNKNOWN", "DELETE_PENDING":
+		return 502
+	case "GATEWAY_API_MISSING", "GATEWAY_CONFIGURATION", "GATEWAY_NOT_CONFIGURED", "GATEWAY_SYNC_INCOMPLETE",
+		"NAMESPACE_CREATION_FAILED", "NAMESPACE_UNAVAILABLE", "SECRET_UNAVAILABLE", "STORAGECLASS_UNAVAILABLE":
+		return 503
+	default:
+		return 400
+	}
 }

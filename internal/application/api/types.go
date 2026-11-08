@@ -4,6 +4,7 @@ package api
 import (
 	"context"
 	"olixops-k8s-ctl/internal/application"
+	"olixops-k8s-ctl/internal/domain"
 	"olixops-k8s-ctl/internal/infrastructure/execctl"
 	clusterk8s "olixops-k8s-ctl/internal/infrastructure/kubernetes"
 )
@@ -173,4 +174,14 @@ type NamespaceMetadataInput struct {
 	Annotations       map[string]string `json:"annotations,omitempty" jsonschema:"Annotations to set or replace"`
 	RemoveLabels      []string          `json:"removeLabels,omitempty" jsonschema:"Label keys to remove"`
 	RemoveAnnotations []string          `json:"removeAnnotations,omitempty" jsonschema:"Annotation keys to remove"`
+}
+
+// TerminalService is the shared terminal and transfer-preparation application port.
+type TerminalService interface {
+	OpenPodTerminal(context.Context, domain.TerminalOpenInput) (domain.TerminalResult, error)
+	WritePodTerminal(context.Context, domain.TerminalWriteInput) (domain.TerminalResult, error)
+	ReadPodTerminal(context.Context, domain.TerminalReadInput) (domain.TerminalResult, error)
+	ClosePodTerminal(context.Context, domain.TerminalSessionInput) (domain.TerminalResult, error)
+	DownloadPodFile(context.Context, domain.DownloadInput) (domain.DownloadOutput, error)
+	UploadPodFile(context.Context, domain.UploadInput) (domain.UploadOutput, error)
 }

@@ -46,15 +46,16 @@ func RegisterCatalog(v1 *gin.RouterGroup, s *app.Service, budgets ...time.Durati
 		ports.GET("", catalogRead(func(ctx context.Context) (any, error) { return s.Ports(ctx, app.PortInput{Limit: 500}) }))
 		ports.POST("/list", catalogCall(s.Ports))
 		ports.POST("/sync", func(c *gin.Context) {
+			ctx, cancel := context.WithTimeout(c.Request.Context(), budget)
+			defer cancel()
+			c.Request = c.Request.WithContext(ctx)
 			// Legacy callers may omit the empty body; supplied JSON still follows the MCP contract.
 			if c.Request.ContentLength != 0 {
-				if _, err := api.Decode[api.EmptyInput](c.Request.Body); err != nil {
+				if _, err := decodeJSON[api.EmptyInput](c); err != nil {
 					operationResult(c, nil, err)
 					return
 				}
 			}
-			ctx, cancel := context.WithTimeout(c.Request.Context(), budget)
-			defer cancel()
 			out, err := s.SyncPorts(ctx)
 			operationResult(c, out, err)
 		})

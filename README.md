@@ -73,6 +73,8 @@ Pod/Deployment 等白名单资源的创建和一般更新走通用 YAML apply，
 
 ## 先看什么
 
+**新同事接手请先阅读 [开发交接文档](docs/developer-handover.md)**：包含框架设计、源码导航、已完成能力、状态归属、HTTP/MCP 与 Shell 链路、接手验收，以及上层多集群和权限等后续开发路径。交接基线为 2026-11-08，本批包含审核修复；Git 版本与线上镜像的差异需按交接文档核对。
+
 建议按下面顺序阅读源码：
 
 1. [cmd/main.go](cmd/main.go)：启动、配置、kubeconfig Provider、client-go、命令 Runner 和路由的组装。
@@ -569,7 +571,7 @@ git diff --check
 4. **读取数据可能带敏感内容**：事件 message、资源 status、Pod 日志和错误文本存在业务信息；现有通用字段过滤不能保证脱敏。
 5. **通用操作仍缺少限流/幂等**：标准目录已增加实例锁、入口锁和持久化幂等键；通用重启、Helm 更新等仍可能重复或竞态。
 6. **状态接口是快照**：扩缩容、重启、回滚和 Helm 操作返回请求结果，不等待应用就绪；没有 watch、流式日志或统一 operation ID。
-7. **通用操作错误模型仍较粗**：标准目录已有业务 reason 和持久化阶段；原有操作仍使用通用错误。
+7. **通用操作仍缺少持久化执行记录**：HTTP/MCP 已统一业务原因码和错误状态，CLI 变更中断返回 `execution_unknown`；通用操作仍没有持久化阶段、operation ID 与自动对账，需要先查询实际状态再决定重试。
 8. **版本和依赖未完全锁定**：Go、kubectl、Helm、Kubernetes server、Gateway API CRD 的兼容矩阵需要在部署流水线中固定并验证。
 
 ## 后续建议顺序
@@ -586,9 +588,12 @@ git diff --check
 
 ## 文档索引
 
+- [开发交接文档](docs/developer-handover.md)：新同事接手的架构、功能、启动验证、开发落点和后续阶段。
+
 - [HTTP 操作器指南](docs/http-operator-guide.md)：独立/操作器配置、curl、终端与文件传输、错误和兼容。
 - [HTTP/MCP 覆盖矩阵](docs/http-mcp-coverage.md) / [OpenAPI 3.1](docs/http-openapi.json)：57 个工具与 HTTP 对应，支持重新生成与测试校验。
 - [双入口测试记录](docs/testing/http-operator-2026-11-06.md)：自动化、模拟上层与真实单集群验收边界。
+- [代码审核修复测试记录](docs/testing/review-fixes-2026-11-07.md)：上传失败清理、终端取消、CLI 超时/结果未知、Catalog 状态码、JSON 读取截止时间及共享代码回归。
 
 - [HTTP/MCP 共享契约实施计划](docs/http-mcp-unified-entry-plan.md)：参考 EnvVault 后端，规划双入口、共享参数与业务逻辑、HTTP 覆盖、终端/文件及操作器模式；已完成本期下层改造，验收结果见操作器指南与测试记录。
 

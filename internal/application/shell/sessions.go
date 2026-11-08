@@ -22,7 +22,7 @@ type Target struct {
 }
 type Session struct {
 	mu               sync.Mutex
-	writeMu          sync.Mutex
+	writePermit      chan struct{}
 	ID, Owner        string
 	Target           Target
 	created, touched time.Time
@@ -132,7 +132,7 @@ func (m *Manager) Open(owner string, target Target, tty bool, backend domain.Pod
 	ctx, cancel := context.WithTimeout(m.root, m.lifetime)
 	r, w := io.Pipe()
 	now := time.Now()
-	s := &Session{ID: uuid.NewString(), Owner: owner, Target: target, created: now, touched: now, cancel: cancel, input: w, reader: r, state: "open", changed: make(chan struct{})}
+	s := &Session{ID: uuid.NewString(), Owner: owner, Target: target, created: now, touched: now, cancel: cancel, input: w, reader: r, state: "open", writePermit: make(chan struct{}, 1), changed: make(chan struct{})}
 	m.sessions[s.ID] = s
 	m.wg.Add(1)
 	go func() {
@@ -170,8 +170,12 @@ func (s *Session) Write(p []byte) (int, error) {
 	return n, nil
 }
 func (m *Manager) Send(ctx context.Context, s *Session, input string) (domain.TerminalResult, error) {
-	s.writeMu.Lock()
-	defer s.writeMu.Unlock()
+	select {
+	case s.writePermit <- struct{}{}:
+		defer func() { <-s.writePermit }()
+	case <-ctx.Done():
+		return domain.TerminalResult{}, ctx.Err()
+	}
 	if ctx.Err() != nil {
 		return domain.TerminalResult{}, ctx.Err()
 	}

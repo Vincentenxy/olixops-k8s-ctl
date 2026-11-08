@@ -40,7 +40,8 @@ func (r *Runner) helm(ctx context.Context, args ...string) ([]byte, error) {
 		return nil, err
 	}
 	defer cleanup()
-	return r.runRaw(ctx, r.cfg.Helm, append(r.kubeArgs(path, contextName, true), args...), nil)
+	mutating := len(args) > 0 && (args[0] == "upgrade" || args[0] == "rollback" || args[0] == "uninstall")
+	return r.runRaw(ctx, r.cfg.Helm, append(r.kubeArgs(path, contextName, true), args...), nil, mutating)
 }
 func (r *Runner) ListHelmReleases(ctx context.Context, namespace string, limit, offset int) ([]HelmRelease, error) {
 	data, err := r.helm(ctx, "list", "--namespace", namespace, "--all", "--max", strconv.Itoa(limit), "--offset", strconv.Itoa(offset), "--output", "json")
@@ -225,7 +226,7 @@ func (r *Runner) RollbackWorkload(ctx context.Context, namespace, kind, name str
 	}
 	defer cleanup()
 	args := append(r.kubeArgs(path, contextName, false), "rollout", "undo", strings.ToLower(kind)+"/"+name, "--namespace", namespace, "--to-revision", strconv.Itoa(revision))
-	if _, err := r.runRaw(ctx, r.cfg.Kubectl, args, nil); err != nil {
+	if _, err := r.runRaw(ctx, r.cfg.Kubectl, args, nil, true); err != nil {
 		return Result{}, err
 	}
 	return Result{Output: "workload rollback requested"}, nil
