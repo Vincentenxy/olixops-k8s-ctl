@@ -20,11 +20,12 @@ import (
 )
 
 type Client struct {
-	restConfig *rest.Config
-	core       kubernetes.Interface
-	dynamic    dynamic.Interface
-	discovery  discovery.DiscoveryInterface
-	context    string
+	execAuthorizationDisabled bool
+	restConfig                *rest.Config
+	core                      kubernetes.Interface
+	dynamic                   dynamic.Interface
+	discovery                 discovery.DiscoveryInterface
+	context                   string
 }
 
 type ClusterStatus struct {
@@ -70,7 +71,14 @@ type GatewaySnapshot struct {
 	Missing   []string          `json:"missingResources,omitempty"`
 }
 
-func New(cfg config.KubernetesConfig, provider kubeconfig.Provider) (*Client, error) {
+type ClientOption func(*Client)
+
+// WithPodExecAuthorization controls target policy, never authentication or cluster RBAC.
+func WithPodExecAuthorization(enabled bool) ClientOption {
+	return func(c *Client) { c.execAuthorizationDisabled = !enabled }
+}
+
+func New(cfg config.KubernetesConfig, provider kubeconfig.Provider, options ...ClientOption) (*Client, error) {
 	restConfig, err := buildRESTConfig(cfg, provider)
 	if err != nil {
 		return nil, err
@@ -89,7 +97,11 @@ func New(cfg config.KubernetesConfig, provider kubeconfig.Provider) (*Client, er
 	if err != nil {
 		return nil, fmt.Errorf("create kubernetes discovery client: %w", err)
 	}
-	return &Client{restConfig: rest.CopyConfig(restConfig), core: core, dynamic: dynamicClient, discovery: discoveryClient, context: cfg.Kubeconfig.Context}, nil
+	client := &Client{restConfig: rest.CopyConfig(restConfig), core: core, dynamic: dynamicClient, discovery: discoveryClient, context: cfg.Kubeconfig.Context}
+	for _, option := range options {
+		option(client)
+	}
+	return client, nil
 }
 
 func buildRESTConfig(cfg config.KubernetesConfig, provider kubeconfig.Provider) (*rest.Config, error) {

@@ -4,13 +4,15 @@
 
 完整路径与应用方法见 [覆盖矩阵](http-mcp-coverage.md)，请求/响应 schema 见 [OpenAPI 3.1](http-openapi.json)。旧路径和成功响应保持兼容；错误现在区分参数、拒绝、冲突、找不到和上游故障。此文档描述下层操作器；统一多集群平台尚未实现。
 
+平台通过服务 ID 与环境解析 Namespace，复用服务权限；本服务已移除静态 Namespace 名单。旧 `kubernetes.allowed-namespaces`、`pod-exec.allowed-namespaces` 兼容读取但忽略。独立接口仍需要具体 Namespace，并保留名称格式、YAML 目标一致性、授权扩展和 Kubernetes RBAC。
+
 ## 启动与入口开关
 
 ```bash
 go run ./cmd --config-dir ./configs
 ```
 
-配置示例：[独立使用](../configs/config.standalone.example.yaml)、[上层操作器](../configs/config.operator.example.yaml)。复制所选示例为部署目录中的 config.yaml，按实际环境填写公钥挂载路径、issuer/audience、Namespace 与 grants。示例不含真实凭据，填写后才可运行。
+配置示例：[独立使用](../configs/config.standalone.example.yaml)、[上层操作器](../configs/config.operator.example.yaml)。复制所选示例为部署目录中的 config.yaml，按实际环境填写公钥挂载路径、issuer/audience 与需要保留的 grants。示例不含真实凭据，填写后才可运行。
 
 | 配置 | 含义 |
 | --- | --- |
@@ -18,7 +20,7 @@ go run ./cmd --config-dir ./configs
 | mcp.enabled | 主 MCP 入口；操作器模式可 false |
 | mcp.write-enabled | 主 MCP 写工具是否注册，不再作为 HTTP 执行的前提 |
 | kubernetes.write-enabled | Kubernetes 写操作的应用层开关；不把 SQLite 配置/端口记录写入等同 Kubernetes 写入 |
-| pod-exec.enabled / shell.enabled | 执行与任意 Shell/终端/文件能力显式启用；保留 Namespace、grants、Pod UID、RBAC 和拦截器检查 |
+| pod-exec.enabled / shell.enabled | 执行与任意 Shell/终端/文件能力显式启用；保留目标参数、grants、Pod UID、RBAC 和拦截器检查 |
 | mcp.diagnostics-only | 旧受限诊断配置，保留兼容；完整操作器使用 false |
 | cluster.id | 稳定集群标识；省略时沿用 catalog.cluster，默认 configured。二者显式配置时必须一致 |
 | server.public-url | 本实例可访问地址，可包含 /k8sctl 前缀；平台应重写为自己的文件传输地址 |

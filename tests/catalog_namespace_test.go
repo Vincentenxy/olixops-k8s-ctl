@@ -44,7 +44,7 @@ func TestCatalogPreflightNamespaceReadCreateAndPolicy(t *testing.T) {
 		{name: "create-forbidden", firstGet: 404, post: 403, wantError: "NAMESPACE_CREATION_FAILED", wantGets: 1, wantPosts: 1},
 		{name: "concurrent-create", firstGet: 404, post: 409, wantGets: 2, wantPosts: 1},
 		{name: "concurrent-terminating", firstGet: 404, post: 409, terminating: true, wantError: "NAMESPACE_TERMINATING", wantGets: 2, wantPosts: 1},
-		{name: "outside-scope", disallowed: true, wantError: "not allowed"},
+		{name: "legacy-scope-ignored", firstGet: 200, disallowed: true, wantGets: 1},
 		{name: "write-disabled", firstGet: 404, disabled: true, wantError: "NAMESPACE_CREATION_FAILED", wantGets: 1},
 		{name: "authorizer-denied", firstGet: 404, deny: true, wantError: "NAMESPACE_CREATION_FAILED", wantGets: 1},
 	} {

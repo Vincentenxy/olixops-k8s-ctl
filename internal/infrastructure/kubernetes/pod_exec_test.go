@@ -7,6 +7,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes/fake"
+	"olixops-k8s-ctl/internal/domain/fault"
 	"testing"
 )
 
@@ -44,6 +45,47 @@ func TestExecTargetEligibility(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestDeferredExecAuthorizationPreservesTargetState(t *testing.T) {
+	yes := true
+	p := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: "app", Namespace: "demo", UID: "uid-1", Labels: map[string]string{"app": "olixops-k8s-ctl"}},
+		Spec: corev1.PodSpec{
+			HostNetwork: true, HostPID: true, HostIPC: true,
+			Containers: []corev1.Container{{Name: "main", SecurityContext: &corev1.SecurityContext{Privileged: &yes}}},
+			Volumes:    []corev1.Volume{{Name: "host", VolumeSource: corev1.VolumeSource{HostPath: &corev1.HostPathVolumeSource{Path: "/"}}}},
+		},
+		Status: corev1.PodStatus{ContainerStatuses: []corev1.ContainerStatus{{Name: "main", State: corev1.ContainerState{Running: &corev1.ContainerStateRunning{}}}}},
+	}
+	client := &Client{core: fake.NewSimpleClientset(p)}
+	_, err := client.CheckPodExecTarget(context.Background(), "demo", "app", "main")
+	require.Error(t, err)
+	WithPodExecAuthorization(false)(client)
+	uid, err := client.CheckPodExecTarget(context.Background(), "demo", "app", "main")
+	require.NoError(t, err)
+	require.Equal(t, "uid-1", uid)
+	_, err = client.CheckPodExecTarget(context.Background(), "demo", "app", "missing")
+	require.Error(t, err)
+	_, err = client.CheckPodExecTarget(context.Background(), "demo", "missing", "main")
+	require.Error(t, err)
+	p.Status.ContainerStatuses = nil
+	_, err = client.core.CoreV1().Pods("demo").Update(context.Background(), p, metav1.UpdateOptions{})
+	require.NoError(t, err)
+	_, err = client.CheckPodExecTarget(context.Background(), "demo", "app", "main")
+	require.Error(t, err)
+	now := metav1.Now()
+	p.DeletionTimestamp = &now
+	_, err = client.core.CoreV1().Pods("demo").Update(context.Background(), p, metav1.UpdateOptions{})
+	require.NoError(t, err)
+	_, err = client.CheckPodExecTarget(context.Background(), "demo", "app", "main")
+	var failure *fault.Error
+	require.ErrorAs(t, err, &failure)
+	require.Equal(t, "conflict", failure.Reason)
+	WithPodExecAuthorization(true)(client)
+	_, err = client.CheckPodExecTarget(context.Background(), "demo", "app", "main")
+	require.ErrorAs(t, err, &failure)
+	require.Equal(t, "forbidden", failure.Reason)
 }
 
 func TestExplicitDiagnosticUIDOptIn(t *testing.T) {

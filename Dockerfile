@@ -13,28 +13,32 @@ ENV GOPROXY=${GOPROXY}
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN --mount=type=cache,target=/go/pkg/mod go mod download
-COPY cmd ./cmd
+COPY cmd/main.go ./cmd/main.go
+COPY cmd/pat ./cmd/pat
 COPY internal ./internal
 COPY pkg ./pkg
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
-    CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
-    go build -mod=readonly -trimpath -ldflags="-s -w" -o /out/olixops-k8s-ctl ./cmd
-RUN --mount=type=cache,target=/go/pkg/mod \
-    --mount=type=cache,target=/root/.cache/go-build \
-    CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
-    go build -mod=readonly -trimpath -ldflags="-s -w" -o /out/k8sctl-pat ./cmd/pat
+    mkdir -p /out \
+    && CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
+    go build -mod=readonly -trimpath -ldflags="-s -w" -o /out/ ./cmd ./cmd/pat \
+    && mv /out/cmd /out/olixops-k8s-ctl \
+    && mv /out/pat /out/k8sctl-pat
 
-FROM ${RUNTIME_IMAGE} AS runtime
+# Independent of source changes: BuildKit can prepare this layer alongside Go.
+FROM ${RUNTIME_IMAGE} AS runtime-base
 
 # Existing Kubernetes/Helm operations invoke fixed argv, never a shell command.
 RUN apk add --no-cache ca-certificates kubectl helm \
     && addgroup -S -g 10001 app && adduser -S -u 10001 -G app app \
     && mkdir -p /data /app/configs && chown app:app /data
 WORKDIR /app
+
+FROM runtime-base AS runtime
+
 COPY --from=build /out/olixops-k8s-ctl /app/olixops-k8s-ctl
 COPY --from=build /out/k8sctl-pat /app/k8sctl-pat
-# Keep developer configuration and local credentials out of the runtime image.
+# Only this credential-free default config is allowed through .dockerignore.
 COPY configs/config.container.yaml /app/configs/config.yaml
 USER 10001:10001
 EXPOSE 8091

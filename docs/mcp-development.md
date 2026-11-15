@@ -1,5 +1,7 @@
 # MCP 开发方案与实现记录
 
+> 2026-11-14 清单核对：当前完整模式最多 **57 个工具：28 个只读、29 个受写能力开关控制**，包含终端、文件准备及标准服务目录。完整清单与开关组合见 [MCP 功能清单](mcp-tool-inventory.md)。下文 48/29 等统计保留为早期实现阶段记录，不能作为当前完整工具数。
+
 > 2026-11-06 双入口更新：主 MCP 现有业务工具均有认证 HTTP 对应入口，终端及文件准备接口已补齐；关闭主 MCP 后仍可作为 HTTP 操作器使用。共享契约、最新开关和调用示例见 [HTTP 操作器指南](http-operator-guide.md)，上层多集群路由仍待实现。
 
 > 2026-11-06 认证更新：已实现可选公司 JWT/PAT 认证。`auth.enabled=true` 时业务接口需要 Bearer，MCP 改为 `/api/v1/mcp`（Higress 下加 `/k8sctl`），旧 `/api/v1/pub/mcp` 不注册。本文原公开入口/API key 或待实现认证描述仅适用于旧兼容模式；资源级授权仍待实现。配置、令牌接口与迁移见 [认证接入说明](authentication.md)。
@@ -12,7 +14,7 @@
 
 新增工具、完整 HTTP 对照、参数、SQLite 持久化、Higress 领用和故障恢复见 [标准服务目录文档](standard-services.md)。
 
-本轮按用户要求先完成操作能力，**身份认证、角色、权限策略、审批和完整审计尚未实现**。业务层已预留可替换的 `domain.Authorizer`，默认 `DeferredAuthorizer` 明确放行。开关、参数校验、资源白名单和 Namespace 范围检查均不是用户权限系统。
+本轮按用户要求先完成操作能力，**身份认证、角色、权限策略、审批和完整审计尚未实现**。业务层已预留可替换的 `domain.Authorizer`，默认 `DeferredAuthorizer` 明确放行。开关、参数校验、资源白名单和 Namespace 格式/目标一致性检查均不是用户权限系统。
 
 完整权限设计见 [MCP 权限控制设计](mcp-authorization-design.md)，该文档只描述后续方案。
 
@@ -62,7 +64,6 @@ mcp:
   write-enabled: false
 kubernetes:
   write-enabled: true
-  allowed-namespaces: []
   command-timeout-seconds: 120
 ```
 
@@ -85,7 +86,7 @@ MCP_ENABLED=false go run ./cmd
 | true | false | 目录开启时注册 48 个；集群变更被拒绝，目录数据库写入仍可执行 |
 | true | true | 目录开启时 48 个工具；关闭时 29 个；范围/参数检查有效，权限占位放行 |
 
-`allowed-namespaces: []` 沿用原语义：允许所有 Namespace。生产权限阶段将另行设计用户的显式作用域，不能把这个空列表当作默认拒绝。
+静态 allowed-namespaces 已取消，旧字段兼容读取但忽略。平台按服务权限解析目标；独立入口保留 Authorizer 扩展和 Kubernetes RBAC，后续权限由业务授权模块实现。
 
 运行主机需要安装 kubectl、Helm（当前命令适配面向 Helm 3），在服务 PATH 中可用或通过 `kubernetes.kubectl` / `kubernetes.helm` 指定。Dockerfile 已加入 kubectl/Helm 安装步骤和持久目录；只有 client-go 查询不依赖 CLI。镜像实际版本须在发布时验收。
 
@@ -182,7 +183,7 @@ Namespace 只通过专用工具管理。Namespace 元数据工具只处理 `meta
 - 接受已配置仓库的 `repo/chart` 或 `oci://registry/path`；不接受任意本地路径、HTTP URL 或额外 CLI flags。仓库/registry 凭据由运行环境配置，不通过工具参数传入。建议明确指定 version。
 - 先拉取 chart 到私有目录，再用同一 tgz 渲染与安装，避免两次下载版本变化。values 为私有临时文件。
 - 检查现有 release manifest（upgrade/rollback/uninstall 都可能删除旧对象）；升级还检查新渲染资源；回滚检查指定 revision。
-- 当前使用 --no-hooks，不执行 chart hooks；不自动安装 CRD 或创建 Namespace。模板包括 CRD 检查，超出资源/Namespace 白名单就拒绝。包含 Secret、ServiceAccount、RBAC 等对象的常见 chart 可能因此无法安装，不能声称兼容所有 chart。
+- 当前使用 --no-hooks，不执行 chart hooks；不自动安装 CRD 或创建 Namespace。模板包括 CRD 检查，超出资源类型白名单或 YAML 与目标 Namespace 不一致就拒绝。包含 Secret、ServiceAccount、RBAC 等对象的常见 chart 可能因此无法安装，不能声称兼容所有 chart。
 - upgrade 使用 --reset-values，新部署取 chart 默认值和本次 values，不隐式继承旧 values；调用者须提交想保留的覆盖配置。
 - 命令输出只返回固定完成说明，避免 Helm NOTES 泄露信息；执行失败返回工具错误，不暴露 stderr。
 - **预渲染检查是功能性前置检查，不是完整安全沙箱**。Helm template 与实际 upgrade 的 Capabilities/lookup、并发 release 更新等可能使实际渲染不同；回滚/卸载检查也不是原子授权。后续权限阶段需受信 chart 来源、版本/摘要绑定、实际提交资源校验（如受控 post-renderer）、并发锁和集群侧最小 RBAC；当前未实现这些权限策略。

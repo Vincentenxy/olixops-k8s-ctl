@@ -30,7 +30,6 @@ auth:
 kubernetes:
   in-cluster: false
   write-enabled: true
-  allowed-namespaces: [developer-demo]
   command-timeout-seconds: 120
   kubectl: kubectl
   helm: helm
@@ -41,7 +40,6 @@ pod-exec:
   enabled: true
   mode: managed
   binary: /path/to/kubernetes-mcp-server
-  allowed-namespaces: [developer-demo]
   grants:
     - user-id: developer-example
       namespace: developer-demo

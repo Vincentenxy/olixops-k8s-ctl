@@ -22,7 +22,7 @@
 
 ## 怎样使用
 
-1. 管理者部署更新后的 k8s-ctl，开启 catalog、MCP 写工具与 Kubernetes 写操作，配置目标 Namespace 白名单及 RBAC。
+1. 管理者部署更新后的 k8s-ctl，开启 catalog、MCP 写工具与 Kubernetes 写操作，准备目标 Namespace 及 RBAC。
 2. 客户端连接上述 MCP，调用 `list_standard_services` 读取环境默认值与七类服务规格。
 3. 用户说“在 wx-test-ns-001 部署一个 MongoDB”，客户端生成唯一 requestId 并调用 `deploy_standard_service`。用户未提供 Namespace 时先提示“请指定部署目标 Namespace”，不能自行选择。
 4. 根据返回的 instance.id、deployment.id 继续查询 `get_service_deployment`，并通过 `verify_service_access` 做服务端协议验证。
@@ -66,7 +66,7 @@ catalog:
   sandbox-runtime-class: ""
 ```
 
-可用 `CATALOG_DEFAULT_OWNER`、`CATALOG_DEFAULT_STORAGE_CLASS`、`CATALOG_SANDBOX_RUNTIME_CLASS` 覆盖。Namespace 必须显式提供且在允许范围内，没有默认 Namespace。旧 default-namespace 配置及对应环境变量不再使用。业务层缺少 Namespace 返回 MISSING_NAMESPACE（提示指定 namespace），非法名称返回 INVALID_NAMESPACE，均在保存配置、分配端口和访问集群之前拒绝。持久服务需要实际可用的 StorageClass。Nginx/沙箱不要求 StorageClass/PVC。ownerId 只是归属元数据。软件规格来自固定版本模板，环境配置只补归属元数据、存储与运行时选择。
+可用 `CATALOG_DEFAULT_OWNER`、`CATALOG_DEFAULT_STORAGE_CLASS`、`CATALOG_SANDBOX_RUNTIME_CLASS` 覆盖。Namespace 必须显式提供并通过现有操作授权，没有默认 Namespace。旧 default-namespace 配置及对应环境变量不再使用。业务层缺少 Namespace 返回 MISSING_NAMESPACE（提示指定 namespace），非法名称返回 INVALID_NAMESPACE，均在保存配置、分配端口和访问集群之前拒绝。持久服务需要实际可用的 StorageClass。Nginx/沙箱不要求 StorageClass/PVC。ownerId 只是归属元数据。软件规格来自固定版本模板，环境配置只补归属元数据、存储与运行时选择。
 
 HTTP 与 MCP 使用同一业务方法：GET `/api/v1/services/standard`，POST `/api/v1/services/deploy-standard`（JSON 为上述 arguments）。HTTP 保留现有 API key 中间件；本批未增加认证流程。
 
@@ -80,7 +80,7 @@ HTTP 与 MCP 使用同一业务方法：GET `/api/v1/services/standard`，POST `
 
 ## 本批验收范围
 
-自动化覆盖缺少/非法 Namespace 无副作用、自动创建/已有复用、读取与创建失败、并发 AlreadyExists 回读和 terminating、范围/写开关/授权限制、七类渲染、版本保留、默认值/别名/参数校验、单请求重放、参数冲突、部分提交恢复、并发端口分配、沙箱到期与失败重试、Deployment/StatefulSet 观测及 UID 删除、协议错误响应与 HTTP 重定向边界、HTTP/MCP 工具发现和写开关。测试使用 SQLite 与模拟 Kubernetes/本地协议端点，不代表七个真实软件镜像均已在目标集群启动成功。
+自动化覆盖缺少/非法 Namespace 无副作用、自动创建/已有复用、读取与创建失败、并发 AlreadyExists 回读和 terminating、目标一致性/写开关/授权限制、七类渲染、版本保留、默认值/别名/参数校验、单请求重放、参数冲突、部分提交恢复、并发端口分配、沙箱到期与失败重试、Deployment/StatefulSet 观测及 UID 删除、协议错误响应与 HTTP 重定向边界、HTTP/MCP 工具发现和写开关。测试使用 SQLite 与模拟 Kubernetes/本地协议端点，不代表七个真实软件镜像均已在目标集群启动成功。
 
 Namespace 自动创建与目标 Namespace 内业务资源权限仍需在目标集群验证。目标集群仍应分别完成：镜像拉取、Pod 就绪、持久卷绑定（数据库）、网关转发、协议检查与客户端访问；沙箱还需验证浏览器 Python 执行和到期清理。本次未执行这些真实集群写操作。
 

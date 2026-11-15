@@ -56,7 +56,7 @@ func NewHandler(service Service, version string, options ...Options) http.Handle
 		}
 	} else {
 		register(server, "cluster_status", "Get cluster version and count of visible namespaces", (api.Operations{Service: service}).ClusterStatus)
-		register(server, "list_namespaces", "List namespaces within the configured scope", (api.Operations{Service: service}).Namespaces)
+		register(server, "list_namespaces", "List namespaces accessible to the Kubernetes credential", (api.Operations{Service: service}).Namespaces)
 		register(server, "list_storage_classes", "List storage class summaries", (api.Operations{Service: service}).StorageClasses)
 		register(server, "list_resources", "List workload, Pod, Service and PVC summaries in a namespace", (api.Operations{Service: service}).Resources)
 		register(server, "list_gateway_resources", "List GatewayClass, Gateway, HTTPRoute and TCPRoute summaries", (api.Operations{Service: service}).GatewayResources)

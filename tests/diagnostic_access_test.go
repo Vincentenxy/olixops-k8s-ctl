@@ -44,8 +44,8 @@ func TestDiagnosticOnlyMCPAndRESTEnforcePerUserGrants(t *testing.T) {
 	kube, err := clusterk8s.New(f.cfg.Kubernetes, provider)
 	require.NoError(t, err)
 	backend := &countingExecutor{}
-	service := application.NewClusterService(kube, nil, f.cfg.Kubernetes, application.WithPodExecutor(backend, []string{"demo"}), application.WithDiagnosticGrants(f.cfg.PodExec.Grants))
-	unguarded := application.NewClusterService(kube, nil, f.cfg.Kubernetes, application.WithPodExecutor(backend, []string{"demo"}))
+	service := application.NewClusterService(kube, nil, f.cfg.Kubernetes, application.WithPodExecutor(backend), application.WithDiagnosticGrants(f.cfg.PodExec.Grants))
+	unguarded := application.NewClusterService(kube, nil, f.cfg.Kubernetes, application.WithPodExecutor(backend))
 	_, err = router.NewWithAuth(f.cfg, unguarded, nil, f.service)
 	require.Error(t, err)
 	engine, err := router.NewWithAuth(f.cfg, service, nil, f.service)

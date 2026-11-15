@@ -329,7 +329,7 @@
                 "additionalProperties": false,
                 "properties": {
                   "namespace": {
-                    "description": "Namespace within the configured allowlist",
+                    "description": "Target Namespace; access is authorized by the platform service policy",
                     "type": "string"
                   }
                 },
@@ -1551,7 +1551,7 @@
     },
     "/api/v1/cluster/namespaces": {
       "get": {
-        "description": "List namespaces within the configured scope",
+        "description": "List namespaces accessible to the Kubernetes credential",
         "operationId": "list_namespaces",
         "responses": {
           "200": {
@@ -1642,7 +1642,7 @@
     },
     "/api/v1/cluster/namespaces/create": {
       "post": {
-        "description": "Create one namespace within the configured scope",
+        "description": "Create one namespace subject to operation authorization",
         "operationId": "create_namespace",
         "requestBody": {
           "content": {
@@ -1651,7 +1651,7 @@
                 "additionalProperties": false,
                 "properties": {
                   "namespace": {
-                    "description": "Namespace within the configured allowlist",
+                    "description": "Target Namespace; access is authorized by the platform service policy",
                     "type": "string"
                   }
                 },
@@ -1755,7 +1755,7 @@
                 "additionalProperties": false,
                 "properties": {
                   "namespace": {
-                    "description": "Namespace within the configured allowlist",
+                    "description": "Target Namespace; access is authorized by the platform service policy",
                     "type": "string"
                   }
                 },
@@ -1873,7 +1873,7 @@
                     "type": "object"
                   },
                   "namespace": {
-                    "description": "Namespace within the configured allowlist",
+                    "description": "Target Namespace; access is authorized by the platform service policy",
                     "type": "string"
                   },
                   "removeAnnotations": {
@@ -4216,7 +4216,7 @@
                 "additionalProperties": false,
                 "properties": {
                   "namespace": {
-                    "description": "Namespace within the configured allowlist",
+                    "description": "Target Namespace; access is authorized by the platform service policy",
                     "type": "string"
                   }
                 },
@@ -7485,7 +7485,7 @@
     },
     "/api/v1/services/deploy-standard": {
       "post": {
-        "description": "Deploy redis, postgres/pg, mysql, mongodb/mongo, milvus, nginx or Python sandbox with defaults and automatic external port. Required software, explicit namespace and unique requestId. If namespace is missing, ask the user to specify it; never infer one. A missing Namespace is created automatically within configured scope/permissions; retry SAME input/id after failure. Sandbox expires automatically. Applied is not proof of readiness or reachability.",
+        "description": "Deploy redis, postgres/pg, mysql, mongodb/mongo, milvus, nginx or Python sandbox with defaults and automatic external port. Required software, explicit namespace and unique requestId. If namespace is missing, ask the user to specify it; never infer one. A missing Namespace is created automatically subject to operation authorization and Kubernetes RBAC; retry SAME input/id after failure. Sandbox expires automatically. Applied is not proof of readiness or reachability.",
         "operationId": "deploy_standard_service",
         "requestBody": {
           "content": {

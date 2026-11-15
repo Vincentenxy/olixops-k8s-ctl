@@ -9,7 +9,6 @@ app:
 kubernetes:
   in-cluster: true
   write-enabled: true # pods/exec is a Kubernetes write; management routes are hidden below.
-  allowed-namespaces: [demo]
   command-timeout-seconds: 30
   kubeconfig:
     source: in-cluster
@@ -37,7 +36,6 @@ pod-exec:
   enabled: true
   mode: sidecar
   endpoint: http://127.0.0.1:8082/mcp
-  allowed-namespaces: [demo]
   grants:
     - user-id: REPLACE_WITH_VERIFIED_USER_ID
       namespace: demo

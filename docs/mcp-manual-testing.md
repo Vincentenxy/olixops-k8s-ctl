@@ -48,7 +48,6 @@ kubernetes:
     source: file
     path: ""       # 空值读取当前用户 ~/.kube/config
     context: ""    # 空值使用 current-context；也可明确指定目标 context
-  allowed-namespaces: [env-vault]
   write-enabled: true
   command-timeout-seconds: 30
 mcp:
@@ -73,7 +72,6 @@ pod-exec:
   enabled: true
   mode: managed
   binary: /Users/vincent/Desktop/codes.nosync/olixops-k8s-ctl/.local/kubernetes-mcp-bin/kubernetes-mcp-server
-  allowed-namespaces: [env-vault]
   grants:
     - user-id: diagnostic-developer
       namespace: env-vault
@@ -271,7 +269,7 @@ MCP 返回内容，智能体通过本地文件能力保存；服务端没有“�
 | 新认证地址 401 | 确认 Codex 进程可读取 PAT；令牌未过期/撤销；与服务器使用同一签名密钥及数据库 |
 | 旧公开地址 404 | 开启认证后是预期行为，改用 /api/v1/mcp，经过 Higress 加 /k8sctl |
 | 只能看到几十个管理工具 | 核对 MCP URL、服务配置和 diagnostics-only；重新连接获取清单 |
-| 日志和 exec 都被拒绝 | 核对 PAT 的真实 UserID、精确 grant、Pod UID、容器名、Namespace 范围和 RBAC |
+| 日志和 exec 都被拒绝 | 核对 PAT 的真实 UserID、精确 grant、Pod UID、容器名、Namespace 参数和 RBAC |
 | 滚动发布后原来可用现在被拒绝 | Pod 名称/UID 变化，由管理员更新授权并重启 |
 | 日志正常但 exec 失败 | 检查上游 v0.1.2、managed 二进制/sidecar 可用性、pods/exec RBAC 和目标 Pod 限制 |
 | 环境变量可读但文件不可读 | 核对文件是否精确授权、普通文件，以及目标是否已有 Perl/Fcntl；不临时装依赖 |

@@ -1,0 +1,81 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: olixops-k8s-ctl-platform
+  namespace: olixops-platform
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: olixops-k8s-ctl
+      app.kubernetes.io/instance: platform
+  template:
+    metadata:
+      labels:
+        app: olixops-k8s-ctl
+        app.kubernetes.io/instance: platform
+    spec:
+      serviceAccountName: olixops-k8s-ctl-platform
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+      containers:
+      - name: controller
+        image: registry.example.com/olixops/k8s-ctl:replace-with-tested-version
+        imagePullPolicy: IfNotPresent
+        ports:
+        - name: http
+          containerPort: 8091
+        resources:
+          requests:
+            cpu: 100m
+            memory: 128Mi
+          limits:
+            cpu: '1'
+            memory: 512Mi
+        startupProbe:
+          httpGet:
+            path: /api/v1/pub/health
+            port: http
+          periodSeconds: 2
+          timeoutSeconds: 2
+          failureThreshold: 60
+        readinessProbe:
+          httpGet:
+            path: /api/v1/pub/ready
+            port: http
+          periodSeconds: 5
+          timeoutSeconds: 2
+        livenessProbe:
+          httpGet:
+            path: /api/v1/pub/health
+            port: http
+          periodSeconds: 10
+          timeoutSeconds: 2
+        volumeMounts:
+        - name: config
+          mountPath: /app/configs
+          readOnly: true
+        - name: platform-auth
+          mountPath: /var/run/k8s-ctl-auth
+          readOnly: true
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - ALL
+      volumes:
+      - name: config
+        configMap:
+          name: olixops-k8s-ctl-platform-config
+      - name: platform-auth
+        secret:
+          secretName: olixops-k8s-ctl-platform-auth
+          defaultMode: 288
+          items:
+          - key: platform-public.pem
+            path: platform-public.pem

@@ -22,13 +22,13 @@ mcp:
   diagnostics-only: false
 ```
 
-还需开启 `auth.enabled`、`kubernetes.write-enabled`、`pod-exec.enabled`，配置明确的 `pod-exec.allowed-namespaces`，并准备上游执行组件。这里的功能开关默认关闭；allow-all 是内容策略占位实现，尚无危险命令保护。
+还需开启 `auth.enabled`、`kubernetes.write-enabled`、`pod-exec.enabled`，并准备上游执行组件。这里的功能开关默认关闭；allow-all 是内容策略占位实现，尚无危险命令保护。
 
 本地使用 `pod-exec.mode: managed` 和官方 v0.1.2 二进制；集群使用 `mode: sidecar` 和 in-cluster，同原有 [桥接部署](kubernetes-mcp-integration.md)。PAT 与 [认证接入说明](authentication.md) 相同。客户端 URL 不变：本地 `http://127.0.0.1:8091/api/v1/mcp`，Higress 下为 `/k8sctl/api/v1/mcp`。重新连接即可发现更新后的参数。
 
 这是完整管理 MCP，不应继续使用 `diagnostics-only: true`。该组合在启动时拒绝。完整管理工具的通用资源级授权仍有待实现，不能把原诊断专用模式的用户隔离承诺套用到全部管理工具。
 
-已有 grants 非空时，仍要求用户精确匹配目标及 `actions: [shell]`；Pod UID 可按原有机制核对。没有 grants 时仍要求 Pod 标签 `k8s-ctl/exec-enabled: "true"`。认证、Namespace 范围、目标安全检查、写开关、Authorizer 与 Kubernetes RBAC 均保留。空命令、含 NUL 或超过 64 KiB 的命令拒绝。
+已有 grants 非空时，仍要求用户精确匹配目标及 `actions: [shell]`；Pod UID 可按原有机制核对。没有 grants 时仍要求 Pod 标签 `k8s-ctl/exec-enabled: "true"`。认证、Namespace 参数格式、目标安全检查、写开关、Authorizer 与 Kubernetes RBAC 均保留。空命令、含 NUL 或超过 64 KiB 的命令拒绝。
 
 ## 调用
 

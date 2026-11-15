@@ -71,7 +71,7 @@ func TestMCPReadOnlyHTTP(t *testing.T) {
 			fmt.Fprint(w, `{"apiVersion":"v1","kind":"Status","reason":"NotFound","code":404}`)
 		default:
 			// All remaining known list endpoints return an empty list.
-			if strings.Contains(r.URL.Path, "secret") || strings.Contains(r.URL.Path, "private") {
+			if strings.Contains(r.URL.Path, "secret") {
 				t.Errorf("out-of-scope request: %s", r.URL.Path)
 			}
 			fmt.Fprint(w, `{"apiVersion":"v1","kind":"List","items":[]}`)
@@ -126,8 +126,8 @@ users:
 		require.NoError(t, err)
 		return string(data)
 	}
-	require.Contains(t, call("cluster_status", map[string]any{}, false), `"namespaceCount":1`)
-	require.NotContains(t, call("list_namespaces", map[string]any{}, false), "private")
+	require.Contains(t, call("cluster_status", map[string]any{}, false), `"namespaceCount":2`)
+	require.Contains(t, call("list_namespaces", map[string]any{}, false), "private")
 	require.Contains(t, call("list_storage_classes", map[string]any{}, false), "standard")
 	call("list_resources", map[string]any{"namespace": "demo"}, false)
 	yamlView := call("get_resource_yaml", map[string]any{"namespace": "demo", "kind": "Deployment", "name": "nginx-demo"}, false)
@@ -141,15 +141,15 @@ users:
 	require.Contains(t, call("get_rollout_status", map[string]any{"namespace": "demo", "kind": "StatefulSet", "name": "db"}, false), `"complete":false`)
 	require.NotContains(t, call("get_rollout_status", map[string]any{"namespace": "demo", "kind": "Deployment", "name": "broken"}, true), "private-upstream-address-token")
 	count := func() int { mu.Lock(); defer mu.Unlock(); return requests }
+	call("list_resources", map[string]any{"namespace": "private"}, false)
+	call("list_gateway_resources", map[string]any{"namespace": "private"}, false)
 	before := count()
-	call("list_resources", map[string]any{"namespace": "private"}, true)
-	call("list_gateway_resources", map[string]any{"namespace": "private"}, true)
 	call("get_rollout_status", map[string]any{"namespace": "demo", "kind": "Secret", "name": "x"}, true)
 	call("get_rollout_status", map[string]any{"namespace": "demo", "kind": "Deployment", "name": "../../private"}, true)
 	call("list_resources", map[string]any{}, true)
 	manifest := "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: demo\n"
 	require.Contains(t, call("validate_manifest", map[string]any{"namespace": "demo", "manifest": manifest}, false), `"valid":true`)
-	call("validate_manifest", map[string]any{"namespace": "private", "manifest": manifest}, true)
+	call("validate_manifest", map[string]any{"namespace": "private", "manifest": manifest}, false)
 	call("validate_manifest", map[string]any{"namespace": "demo", "manifest": strings.ReplaceAll(manifest, "ConfigMap", "Secret")}, true)
 	sensitive := call("validate_manifest", map[string]any{"namespace": "demo", "manifest": "sensitive-value: [broken"}, true)
 	require.NotContains(t, sensitive, "sensitive-value")

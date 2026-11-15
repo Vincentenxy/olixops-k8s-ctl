@@ -1,0 +1,58 @@
+﻿tool name,mcp call,http call,result,test scene
+cluster_status,PASS，M tools/call,PASS，O GET /api/v1/cluster/status；P 无直接代理,已测场景通过,publish 解析的 gdl-dev-lucy；读取版本 v1.33.7-3 和 Namespace 数量
+list_namespaces,PASS，M tools/call,PASS，O GET /api/v1/cluster/namespaces；P 无直接代理,已测场景通过,读取 Namespace 列表；结束后确认本轮 6 个临时 Namespace 均不在列表中
+list_storage_classes,PASS，M tools/call,PASS，O GET /api/v1/cluster/storage-classes；P 无直接代理,已测场景通过,查询真实 StorageClass 列表
+list_resources,PASS，M tools/call,PASS，O POST /api/v1/cluster/resources/summary；P 无直接代理,已测场景通过,namespace=setting-efficient，查询资源摘要
+list_gateway_resources,PASS，M tools/call,PASS，O POST /api/v1/cluster/gateways/list；P 无直接代理,已测场景通过,namespace=setting-efficient，查询网关资源；不操作 Higress 端口台账
+get_rollout_status,PASS，M tools/call,PASS，O POST /api/v1/cluster/workloads/rollout；P 无直接代理,已测场景通过,Deployment/setting-efficient-api，desired=ready=updated=1，complete=true
+validate_manifest,PASS，M tools/call,PASS，O POST /api/v1/cluster/kubectl/validate；P 无直接代理,已测场景通过,合法 ConfigMap YAML 本地校验，valid=true，不写集群
+get_workload_history,PASS，M tools/call,PASS，O POST /api/v1/cluster/workloads/history；P 无直接代理,已测场景通过,查询业务 Deployment 修订历史，limit=10
+get_resource,PASS，M tools/call,PASS，O POST /api/v1/cluster/resources/get；P 无直接代理,已测场景通过,读取业务 Deployment 结构化详情；缺 name 返回参数错误
+get_resource_yaml,PASS，M tools/call,PASS，O POST /api/v1/cluster/resources/yaml；P 无直接代理,已测场景通过,读取业务 Deployment 和 Namespace 原始 YAML；未知字段拒绝；不存在资源返回 not_found
+list_resource_objects,PASS，M tools/call,PASS，O POST /api/v1/cluster/resources/list；P 无直接代理,已测场景通过,Pod 列表 limit=1；limit=201 拒绝
+list_events,PASS，M tools/call,PASS，O POST /api/v1/cluster/events/list；P 无直接代理,常规通过；旧游标错误分类待完善,事件 limit=5；新 continue 跨两入口翻页成功；旧 continue 返回笼统错误，见缺陷 B01
+get_pod_logs,PASS，M tools/call,PASS，O POST /api/v1/cluster/pods/logs；P 本轮通过,已测场景通过,业务 Pod 最近 3 行日志；另通过 publish 服务工具复验日志
+list_helm_releases,PASS，M tools/call,PASS，O POST /api/v1/cluster/helm/list；P 无直接代理,已测场景通过,setting-efficient 的 release 列表，limit=10
+get_helm_status,PASS，M tools/call,PASS，O POST /api/v1/cluster/helm/status；P 无直接代理,已测场景通过,业务 release setting-efficient-api，status=deployed；不执行升级
+get_helm_history,PASS，M tools/call,PASS，O POST /api/v1/cluster/helm/history；P 无直接代理,已测场景通过,业务 release 修订历史，limit=10
+apply_manifest,PASS，M tools/call,PASS，O POST /api/v1/cluster/kubectl/apply；P 无直接代理,已测场景通过,每条入口各自在临时 Namespace 创建 ConfigMap 和 replicas=0 的 Deployment，回读验证
+dry_run_manifest,PASS，M tools/call,PASS，O POST /api/v1/cluster/kubectl/dry-run；P 无直接代理,已测场景通过,serverSide=false，真实服务端 dry-run；回读确认 ConfigMap 尚未落地
+helm_upgrade,PASS，M tools/call,PASS，O POST /api/v1/cluster/helm/upgrade；P 无直接代理,已测场景通过,每条入口各安装临时 ConfigMap-only Chart，再升级 probe:first→second，回读验证；wait=false
+scale_workload,PASS，M tools/call,PASS，O POST /api/v1/cluster/workloads/scale；P 无直接代理,已测场景通过,临时 Deployment 显式设 replicas=0 再设 1，回读 0 和 Ready=1；错误类型拒绝
+restart_workload,PASS，M tools/call,PASS，O POST /api/v1/cluster/workloads/restart；P 无直接代理,已测场景通过,临时 Deployment restart；回读 restartedAt 和修订号增加
+rollback_workload,PASS，M tools/call,PASS，O POST /api/v1/cluster/workloads/rollback；P 无直接代理,已测场景通过,临时 Deployment 回滚到显式 revision=1；回读 restart 注解已移除
+delete_resource,PASS，M tools/call,PASS，O POST /api/v1/cluster/resources/delete；P 无直接代理,已测场景通过,删除临时 ConfigMap；回读确认不存在
+helm_rollback,PASS，M tools/call,PASS，O POST /api/v1/cluster/helm/rollback；P 无直接代理,已测场景通过,临时 Helm release 回滚 revision=1；实际 ConfigMap 值 second→first
+helm_uninstall,PASS，M tools/call,PASS，O POST /api/v1/cluster/helm/uninstall；P 无直接代理,已测场景通过,卸载临时 Helm release；确认其 ConfigMap 不存在；不卸载业务服务
+create_namespace,PASS，M tools/call,PASS，O POST /api/v1/cluster/namespaces/create；P 无直接代理,已测场景通过,每条入口各创建临时 Namespace；带命名时间戳，测试后清理
+delete_namespace,PASS，M tools/call,PASS，O POST /api/v1/cluster/namespaces/delete；P 无直接代理,已测场景通过,删除自己的临时 Namespace；最终完整列表确认消失；default 删除拒绝
+update_namespace_metadata,PASS，M tools/call,PASS，O POST /api/v1/cluster/namespaces/metadata；P 无直接代理,已测场景通过,临时 Namespace 设置 labels/annotations 并回读；修改 spec 请求拒绝
+update_configmap,PASS，M tools/call,PASS，O POST /api/v1/cluster/configmaps/update；P 无直接代理,已测场景通过,合并 test:one→two；回读 keep:original 仍保留
+exec_pod_command,PASS，M tools/call,PASS，O POST /api/v1/cluster/pods/exec；P 复用 11-13 通过证据,已测场景通过,业务 Pod printf 成功；12 KiB 命令通过；exit 7 返回执行失败；NUL 命令拒绝；仅随机 /tmp 文件用于传输测试
+open_pod_terminal,PASS，M tools/call,PASS，O POST /api/v1/cluster/pods/terminals/open；P 复用 11-13 通过证据,已测场景通过,真实 Pod /bin/sh + tty=true；会话后续可跨 HTTP/MCP 操作
+write_pod_terminal,PASS，M tools/call,PASS，O POST /api/v1/cluster/pods/terminals/write；P 复用 11-13 通过证据,已测场景通过,写入 printf、sleep、Ctrl+C；中断后可继续执行命令；不把终端回显误判为输出
+read_pod_terminal,PASS，M tools/call,PASS，O POST /api/v1/cluster/pods/terminals/read；P 复用 11-13 通过证据,已测场景通过,base64 输出、nextCursor、Ctrl+C 后输出；跨用户 HTTP 读拒绝；已关闭会话不可再读
+close_pod_terminal,PASS，M tools/call,PASS，O POST /api/v1/cluster/pods/terminals/close；P 复用 11-13 通过证据,已测场景通过,HTTP/MCP 各关闭自己的会话；随后 read 返回 not_found
+download_pod_file,PASS，M tools/call,PASS，O POST /api/v1/cluster/pods/files/prepare-download；P 复用 11-13 通过证据,已测场景通过,"准备下载并实际 POST 文件流；0 / 65,792 字节逐字节一致；同一引用再次下载 404"
+upload_pod_file,PASS，M tools/call,PASS，O POST /api/v1/cluster/pods/files/prepare-upload；P 复用 11-13 通过证据,已测场景通过,准备上传并实际 POST 文件流；Content-Length、返回 size/SHA-256 匹配；清理随机 /tmp 文件
+list_service_templates,BLOCKED；M 未注册此工具,BLOCKED；GET /api/v1/templates（当前操作器未启用）,当前平台链路未启用，未验收,当前平台操作器 Catalog=false，未执行此链路；8091 独立实例的只读结果不计为平台通过
+get_service_template,BLOCKED；M 未注册此工具,BLOCKED；POST /api/v1/templates/get（当前操作器未启用）,当前平台链路未启用，未验收,当前平台操作器 Catalog=false，不能按模板版本查询
+save_service_template,BLOCKED；M 未注册此工具,BLOCKED；POST /api/v1/templates/save（当前操作器未启用）,当前平台链路未启用，未验收,当前平台操作器 Catalog=false，未保存新模板版本
+list_standard_services,BLOCKED；M 未注册此工具,BLOCKED；GET /api/v1/services/standard（当前操作器未启用）,当前平台链路未启用，未验收,当前平台操作器 Catalog=false，未执行此链路
+deploy_standard_service,BLOCKED；M 未注册此工具,BLOCKED；POST /api/v1/services/deploy-standard（当前操作器未启用）,当前平台链路未启用，未验收,当前平台操作器 Catalog=false；涉及标准服务和端口分配，未执行
+preview_service_config,BLOCKED；M 未注册此工具,BLOCKED；POST /api/v1/services/preview-config（当前操作器未启用）,当前平台链路未启用，未验收,当前平台操作器 Catalog=false，未执行渲染预览
+list_service_instances,BLOCKED；M 未注册此工具,BLOCKED；POST /api/v1/services/list（当前操作器未启用）,当前平台链路未启用，未验收,当前平台操作器 Catalog=false，未执行此链路；8091 独立实例的只读结果不计为平台通过
+get_service_instance,BLOCKED；M 未注册此工具,BLOCKED；POST /api/v1/services/get（当前操作器未启用）,当前平台链路未启用，未验收,当前平台操作器 Catalog=false，未查询 SQLite 实例
+save_service_config,BLOCKED；M 未注册此工具,BLOCKED；POST /api/v1/services/save-config（当前操作器未启用）,当前平台链路未启用，未验收,当前平台操作器 Catalog=false，未创建配置修订
+list_service_revisions,BLOCKED；M 未注册此工具,BLOCKED；POST /api/v1/services/revisions（当前操作器未启用）,当前平台链路未启用，未验收,当前平台操作器 Catalog=false，未查询修订
+prepare_service_deployment,BLOCKED；M 未注册此工具,BLOCKED；POST /api/v1/services/prepare-deployment（当前操作器未启用）,当前平台链路未启用，未验收,当前平台操作器 Catalog=false，未冻结 YAML / 分配端口
+deploy_service,BLOCKED；M 未注册此工具,BLOCKED；POST /api/v1/services/deploy（当前操作器未启用）,当前平台链路未启用，未验收,这是下层 Catalog deploy_service，不能用 publish deploy-service 的成功替代；当前未启用
+get_service_deployment,BLOCKED；M 未注册此工具,BLOCKED；POST /api/v1/services/deployment（当前操作器未启用）,当前平台链路未启用，未验收,当前平台操作器 Catalog=false，未查询标准服务部署
+verify_service_access,BLOCKED；M 未注册此工具,BLOCKED；POST /api/v1/services/verify-access（当前操作器未启用）,当前平台链路未启用，未验收,当前平台操作器 Catalog=false，未验证标准服务 LB 端口协议
+list_service_deployments,BLOCKED；M 未注册此工具,BLOCKED；POST /api/v1/services/deployments（当前操作器未启用）,当前平台链路未启用，未验收,当前平台操作器 Catalog=false，未查询标准服务部署历史
+delete_service_instance,BLOCKED；M 未注册此工具,BLOCKED；POST /api/v1/services/delete（当前操作器未启用）,当前平台链路未启用，未验收,当前平台操作器 Catalog=false，未执行标准服务资源/端口回收
+list_gateway_ports,SKIP，未调用,SKIP；POST /api/v1/ports/list,按要求跳过,按用户要求不测试 Higress 端口台账
+sync_gateway_ports,SKIP，未调用,SKIP；POST /api/v1/ports/sync,按要求跳过,按用户要求不测试 Higress 端口台账
+reserve_gateway_port,SKIP，未调用,SKIP；POST /api/v1/ports/reserve,按要求跳过,按用户要求不测试 Higress 端口台账
+release_gateway_port,SKIP，未调用,SKIP；POST /api/v1/ports/release,按要求跳过,按用户要求不测试 Higress 端口台账
+list_gateway_port_events,SKIP，未调用,SKIP；POST /api/v1/ports/events,按要求跳过,按用户要求不测试 Higress 端口台账

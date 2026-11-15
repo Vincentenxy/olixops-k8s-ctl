@@ -1,0 +1,13 @@
+# containers/kubernetes-mcp-server v0.1.2, private sidecar only.
+port = "8082"
+bind_address = "127.0.0.1"
+stateless = true
+cluster_provider_strategy = "in-cluster"
+toolsets = ["core"]
+enabled_tools = ["pods_exec"]
+read_only = false
+max_backend_response_bytes = 262144
+max_result_bytes = 1048576
+max_in_flight = 4
+log_level = 0
+log_file = "stderr"

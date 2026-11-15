@@ -1,0 +1,11 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources: [../base]
+components:
+  - ../components/exec
+  - ../components/catalog
+configMapGenerator:
+  - name: olixops-k8s-ctl-platform-config
+    namespace: olixops-platform
+    behavior: replace
+    files: [config.yaml]

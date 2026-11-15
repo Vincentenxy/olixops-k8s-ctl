@@ -1,0 +1,20 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - namespace.yaml
+  - serviceaccount.yaml
+  - deployment.yaml
+  - service.yaml
+  - rbac/discovery.yaml
+  - rbac/workloads.yaml
+  - rbac/namespaces.yaml
+  - rbac/helm.yaml
+configMapGenerator:
+  - name: olixops-k8s-ctl-platform-config
+    namespace: olixops-platform
+    files: [config.yaml]
+# Replace these values with your tested controller image before applying.
+images:
+  - name: registry.example.com/olixops/k8s-ctl
+    newName: registry.example.com/olixops/k8s-ctl
+    newTag: replace-with-tested-version

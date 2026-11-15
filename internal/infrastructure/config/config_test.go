@@ -8,6 +8,29 @@ import (
 	"testing"
 )
 
+func TestPodExecAuthorizationConfiguration(t *testing.T) {
+	for _, value := range []string{"", "true", "false"} {
+		t.Run("authorization="+value, func(t *testing.T) {
+			t.Setenv("POD_EXEC_AUTHORIZATION_ENABLED", "")
+			dir := t.TempDir()
+			body := "server:\n  host: 127.0.0.1\n  port: 8091\n"
+			if value != "" {
+				body += "pod-exec:\n  authorization-enabled: " + value + "\n"
+			}
+			if err := os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(body), 0600); err != nil {
+				t.Fatal(err)
+			}
+			cfg, err := Load(dir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if cfg.PodExec.AuthorizeTargets() != (value != "false") {
+				t.Fatalf("authorization-enabled=%q was not loaded", value)
+			}
+		})
+	}
+}
+
 func TestDownloadPublicURL(t *testing.T) {
 	for _, tc := range []struct {
 		value string

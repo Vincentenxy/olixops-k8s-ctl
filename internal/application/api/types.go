@@ -12,7 +12,7 @@ import (
 type EmptyInput struct{}
 
 type NamespaceInput struct {
-	Namespace string `json:"namespace" jsonschema:"Namespace within the configured allowlist"`
+	Namespace string `json:"namespace" jsonschema:"Target Namespace; access is authorized by the platform service policy"`
 }
 
 type RolloutInput struct {
@@ -169,7 +169,7 @@ type ConfigMapInput struct {
 }
 
 type NamespaceMetadataInput struct {
-	Namespace         string            `json:"namespace" jsonschema:"Namespace within the configured allowlist"`
+	Namespace         string            `json:"namespace" jsonschema:"Target Namespace; access is authorized by the platform service policy"`
 	Labels            map[string]string `json:"labels,omitempty" jsonschema:"Labels to set or replace"`
 	Annotations       map[string]string `json:"annotations,omitempty" jsonschema:"Annotations to set or replace"`
 	RemoveLabels      []string          `json:"removeLabels,omitempty" jsonschema:"Label keys to remove"`

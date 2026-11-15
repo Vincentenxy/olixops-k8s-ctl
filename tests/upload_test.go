@@ -153,7 +153,7 @@ func TestUploadThroughMainMCP(t *testing.T) {
 	manager := sessions.NewManager(time.Minute, time.Hour, 4, 2)
 	defer manager.Close()
 	backend := &uploadBackend{stages: map[string][]byte{}, files: map[string][]byte{}}
-	service := application.NewClusterService(client, nil, f.cfg.Kubernetes, application.WithPodExecutor(&countingExecutor{}, []string{"demo"}), application.WithShell(true, true, interceptor.AllowAll{}), application.WithTerminals(backend, manager))
+	service := application.NewClusterService(client, nil, f.cfg.Kubernetes, application.WithPodExecutor(&countingExecutor{}), application.WithShell(true, true, interceptor.AllowAll{}), application.WithTerminals(backend, manager))
 	engine, err := router.NewWithAuth(f.cfg, service, nil, f.service)
 	require.NoError(t, err)
 	server := httptest.NewServer(engine)

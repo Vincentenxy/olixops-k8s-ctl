@@ -109,28 +109,79 @@ func operatorPodAPI(t *testing.T) *httptest.Server {
 		fmt.Fprint(w, `{"apiVersion":"v1","kind":"NamespaceList","items":[{"metadata":{"name":"demo"}}]}`)
 	}))
 }
-func operatorClient(t *testing.T, cfg config.KubernetesConfig, endpoint string) *k8s.Client {
+func operatorClient(t *testing.T, cfg config.KubernetesConfig, endpoint string, options ...k8s.ClientOption) *k8s.Client {
 	t.Helper()
 	p := memoryKubeconfig(fmt.Sprintf("apiVersion: v1\nkind: Config\nclusters:\n- name: test\n  cluster:\n    server: %s\ncontexts:\n- name: test\n  context:\n    cluster: test\n    user: test\ncurrent-context: test\nusers:\n- name: test\n  user: {}\n", endpoint))
-	c, e := k8s.New(cfg, p)
+	c, e := k8s.New(cfg, p, options...)
 	require.NoError(t, e)
 	return c
+}
+
+func TestHTTPExecAuthorizationSwitchWithoutPodLabel(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"apiVersion":"v1","kind":"Pod","metadata":{"name":"app","namespace":"demo","uid":"uid-1"},"spec":{"containers":[{"name":"app"}]},"status":{"containerStatuses":[{"name":"app","state":{"running":{}}}]}}`)
+	}))
+	defer upstream.Close()
+	for _, enabled := range []bool{true, false} {
+		t.Run(fmt.Sprintf("authorization=%v", enabled), func(t *testing.T) {
+			f := newAuthFixture(t)
+			f.cfg.Kubernetes.WriteEnabled = true
+			f.cfg.Kubernetes.InCluster = true
+			f.cfg.Shell.Enabled = true
+			f.cfg.PodExec.Enabled = true
+			f.cfg.MCP.Enabled = false
+			manager := sessions.NewManager(time.Minute, time.Hour, 4, 2)
+			defer manager.Close()
+			executor := &countingExecutor{}
+			streams := operatorStreams{&uploadBackend{stages: map[string][]byte{}, files: map[string][]byte{}}}
+			service := application.NewClusterService(operatorClient(t, f.cfg.Kubernetes, upstream.URL, k8s.WithPodExecAuthorization(enabled)), nil, f.cfg.Kubernetes, application.WithPodExecutor(executor), application.WithShell(true, false, nil), application.WithTerminals(streams, manager))
+			engine, err := router.NewWithAuth(f.cfg, service, nil, f.service)
+			require.NoError(t, err)
+			server := httptest.NewServer(engine)
+			defer server.Close()
+			target := domain.TerminalTarget{Namespace: "demo", Pod: "app", Container: "app"}
+			for _, request := range []struct {
+				path string
+				body any
+			}{
+				{"/exec", domain.PodExecInput{Namespace: "demo", Pod: "app", Container: "app", Action: "shell", Command: "printf ok"}},
+				{"/terminals/open", domain.TerminalOpenInput{TerminalTarget: target}},
+				{"/files/prepare-upload", domain.UploadInput{TerminalTarget: target, Path: "/tmp/demo.txt"}},
+				{"/files/prepare-download", domain.DownloadInput{TerminalTarget: target, Path: "/tmp/demo.txt"}},
+			} {
+				status, result := operatorRequest(t, server.URL, f.company(t, nil, nil), "POST", "/api/v1/cluster/pods"+request.path, request.body)
+				if enabled {
+					require.Equal(t, 403, status, request.path)
+				} else {
+					require.Equal(t, 200, status, "%s: %s", request.path, result.Msg)
+				}
+				status, _ = operatorRequest(t, server.URL, "invalid", "POST", "/api/v1/cluster/pods"+request.path, request.body)
+				require.Equal(t, 401, status)
+			}
+			if enabled {
+				require.Equal(t, int32(0), executor.calls.Load())
+			} else {
+				require.Equal(t, int32(1), executor.calls.Load())
+			}
+		})
+	}
 }
 func TestOperatorHTTPWithoutMainMCP(t *testing.T) {
 	f := newAuthFixture(t)
 	f.cfg.MCP.Enabled = false
 	f.cfg.MCP.WriteEnabled = false
-	f.cfg.Kubernetes = config.KubernetesConfig{InCluster: true, WriteEnabled: true, AllowedNamespaces: []string{"demo"}}
+	f.cfg.Kubernetes = config.KubernetesConfig{InCluster: true, WriteEnabled: true, AllowedNamespaces: []string{"legacy-other"}}
 	f.cfg.Cluster.ID = "poc"
 	f.cfg.Shell.Enabled = true
-	f.cfg.PodExec = config.PodExecConfig{Enabled: true, AllowedNamespaces: []string{"demo"}}
+	f.cfg.PodExec = config.PodExecConfig{Enabled: true}
 	upstream := operatorPodAPI(t)
 	defer upstream.Close()
 	manager := sessions.NewManager(time.Minute, time.Hour, 4, 2)
 	defer manager.Close()
 	streams := operatorStreams{&uploadBackend{stages: map[string][]byte{}, files: map[string][]byte{}}}
 	executor := &countingExecutor{}
-	service := application.NewClusterService(operatorClient(t, f.cfg.Kubernetes, upstream.URL), nil, f.cfg.Kubernetes, application.WithPodExecutor(executor, []string{"demo"}), application.WithShell(true, true, interceptor.AllowAll{}), application.WithTerminals(streams, manager), application.WithClusterID("poc"))
+	service := application.NewClusterService(operatorClient(t, f.cfg.Kubernetes, upstream.URL), nil, f.cfg.Kubernetes, application.WithPodExecutor(executor), application.WithShell(true, true, interceptor.AllowAll{}), application.WithTerminals(streams, manager), application.WithClusterID("poc"))
 	engine, e := router.NewWithAuth(f.cfg, service, nil, f.service)
 	require.NoError(t, e)
 	server := httptest.NewServer(engine)
@@ -379,7 +430,7 @@ func TestOperatorProxyDownloadCancellation(t *testing.T) {
 	manager := sessions.NewManager(time.Minute, time.Hour, 2, 1)
 	defer manager.Close()
 	backend := &cancelDownloadBackend{done: make(chan struct{})}
-	svc := application.NewClusterService(operatorClient(t, f.cfg.Kubernetes, upstream.URL), nil, f.cfg.Kubernetes, application.WithPodExecutor(&countingExecutor{}, []string{"demo"}), application.WithShell(true, true, interceptor.AllowAll{}), application.WithTerminals(backend, manager))
+	svc := application.NewClusterService(operatorClient(t, f.cfg.Kubernetes, upstream.URL), nil, f.cfg.Kubernetes, application.WithPodExecutor(&countingExecutor{}), application.WithShell(true, true, interceptor.AllowAll{}), application.WithTerminals(backend, manager))
 	engine, e := router.NewWithAuth(f.cfg, svc, nil, f.service)
 	require.NoError(t, e)
 	server := httptest.NewServer(engine)

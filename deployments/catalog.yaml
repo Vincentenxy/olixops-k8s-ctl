@@ -43,7 +43,6 @@ data:
         reference: ""
         context: ""
       write-enabled: true
-      allowed-namespaces: []
       command-timeout-seconds: 120
       kubectl: kubectl
       helm: helm
@@ -89,7 +88,6 @@ data:
       binary: kubernetes-mcp-server
       grants: []
       endpoint: http://127.0.0.1:8082/mcp
-      allowed-namespaces: [] # Must explicitly list business namespaces before enabling.
 
 
     mcp:

@@ -83,7 +83,7 @@ func main() {
 		}
 		kubeconfigProvider = managedSnapshot
 	}
-	clusterClient, err := clusterk8s.New(cfg.Kubernetes, kubeconfigProvider)
+	clusterClient, err := clusterk8s.New(cfg.Kubernetes, kubeconfigProvider, clusterk8s.WithPodExecAuthorization(cfg.PodExec.AuthorizeTargets()))
 	if err != nil {
 		logger.L().Fatal("init kubernetes client failed", zap.Error(err))
 	}
@@ -106,10 +106,10 @@ func main() {
 		if e != nil {
 			logger.L().Fatal("init Kubernetes MCP bridge failed", zap.Error(e))
 		}
-		serviceOptions = append(serviceOptions, application.WithPodExecutor(backend, cfg.PodExec.AllowedNamespaces))
+		serviceOptions = append(serviceOptions, application.WithPodExecutor(backend))
 	}
 	serviceOptions = append(serviceOptions, application.WithShell(cfg.Shell.Enabled, cfg.Shell.Interceptor.Enabled, interceptor.AllowAll{}))
-	if cfg.MCP.DiagnosticsOnly || len(cfg.PodExec.Grants) > 0 {
+	if cfg.PodExec.AuthorizeTargets() && (cfg.MCP.DiagnosticsOnly || len(cfg.PodExec.Grants) > 0) {
 		serviceOptions = append(serviceOptions, application.WithDiagnosticGrants(cfg.PodExec.Grants))
 	}
 	if cfg.Shell.Enabled {

@@ -1,0 +1,56 @@
+tool_name,group,runtime_registered,read_only_hint,k8s_write_or_effect,target,system_boundary,finding,evidence
+query-chart-list,查询与元数据,yes,True,否,服务 ID + 环境，由平台解析,只读，不执行 Kubernetes 资源写入,READ_ONLY,src/main/java/net/gtjaqh/pubdevops/mcp/ChartOptTools.java:23
+config-search,查询与元数据,yes,True,否,服务 ID + 环境，由平台解析,只读，不执行 Kubernetes 资源写入,READ_ONLY,src/main/java/net/gtjaqh/pubdevops/mcp/ConfigOptTools.java:42
+query-service-current-config,查询与元数据,yes,True,否,服务 ID + 环境，由平台解析,只读，不执行 Kubernetes 资源写入,READ_ONLY,src/main/java/net/gtjaqh/pubdevops/mcp/ConfigOptTools.java:79
+query-file-content-form-gitlab,远程文本读取,yes,True,否,已配置 GitLab 站点或 OSS 客户端地址,固定站点/桶内读取，不是控制服务本机 Shell；平台凭据可能具有较宽读取范围，本轮未新增脱敏,READ_ONLY_CREDENTIAL_SCOPE,src/main/java/net/gtjaqh/pubdevops/mcp/FileDownloadTools.java:37
+query-file-content-form-oss,远程文本读取,yes,True,否,已配置 GitLab 站点或 OSS 客户端地址,固定站点/桶内读取，不是控制服务本机 Shell；平台凭据可能具有较宽读取范围，本轮未新增脱敏,READ_ONLY_CREDENTIAL_SCOPE,src/main/java/net/gtjaqh/pubdevops/mcp/FileDownloadTools.java:77
+query-plan-overview,查询与元数据,yes,True,否,服务 ID + 环境，由平台解析,只读，不执行 Kubernetes 资源写入,READ_ONLY,src/main/java/net/gtjaqh/pubdevops/mcp/GplotTools.java:26
+query-plan-gplot,查询与元数据,yes,True,否,服务 ID + 环境，由平台解析,只读，不执行 Kubernetes 资源写入,READ_ONLY,src/main/java/net/gtjaqh/pubdevops/mcp/GplotTools.java:42
+save-plan-gplot,发布计划写入,yes,False,否；保存受限计划拓扑,服务 ID + 环境，由平台解析,保留服务/发布单身份约束，不执行发布,RECORD_WRITE,src/main/java/net/gtjaqh/pubdevops/mcp/GplotTools.java:57
+query-jira-issue,查询与元数据,yes,True,否,服务 ID + 环境，由平台解析,只读，不执行 Kubernetes 资源写入,READ_ONLY,src/main/java/net/gtjaqh/pubdevops/mcp/InventoryCreateTools.java:51
+validate-magic-v2-inventory,查询与元数据,yes,True,否,服务 ID + 环境，由平台解析,只读，不执行 Kubernetes 资源写入,READ_ONLY,src/main/java/net/gtjaqh/pubdevops/mcp/InventoryCreateTools.java:68
+create-magic-v2-upgrade,发布单写入,yes,False,不直接执行集群部署；保存发布单并发出创建事件,服务 ID + 环境，由平台解析,MCP 创建发布单，后续发布流程另行处理，不等于修改集群系统资源,RECORD_WRITE,src/main/java/net/gtjaqh/pubdevops/mcp/InventoryCreateTools.java:82
+create-magic-v2-sql,发布单写入,yes,False,不直接执行集群部署；保存发布单并发出创建事件,服务 ID + 环境，由平台解析,MCP 创建发布单，后续发布流程另行处理，不等于修改集群系统资源,RECORD_WRITE,src/main/java/net/gtjaqh/pubdevops/mcp/InventoryCreateTools.java:93
+create-magic-v2-network,发布单写入,yes,False,不直接执行集群部署；保存发布单并发出创建事件,服务 ID + 环境，由平台解析,MCP 创建发布单，后续发布流程另行处理，不等于修改集群系统资源,RECORD_WRITE,src/main/java/net/gtjaqh/pubdevops/mcp/InventoryCreateTools.java:104
+create-magic-v2-other,发布单写入,yes,False,不直接执行集群部署；保存发布单并发出创建事件,服务 ID + 环境，由平台解析,MCP 创建发布单，后续发布流程另行处理，不等于修改集群系统资源,RECORD_WRITE,src/main/java/net/gtjaqh/pubdevops/mcp/InventoryCreateTools.java:115
+query-magic-v2-inventory-batch,查询与元数据,yes,True,否,服务 ID + 环境，由平台解析,只读，不执行 Kubernetes 资源写入,READ_ONLY,src/main/java/net/gtjaqh/pubdevops/mcp/InventoryCreateTools.java:126
+single-inventory-content,查询与元数据,yes,True,否,服务 ID + 环境，由平台解析,只读，不执行 Kubernetes 资源写入,READ_ONLY,src/main/java/net/gtjaqh/pubdevops/mcp/InventoryOptTools.java:36
+get-inventory-id-list,查询与元数据,yes,True,否,服务 ID + 环境，由平台解析,只读，不执行 Kubernetes 资源写入,READ_ONLY,src/main/java/net/gtjaqh/pubdevops/mcp/InventoryOptTools.java:60
+k8sctl-get-service-logs,k8s-ctl 代理,yes,True,否,服务元数据、发布标签、实际 Pod/容器；引用还绑定用户/Pod UID/runtime,拒绝无关 Pod，但没有独立基础设施目标禁令；不能把服务归属等同于系统保护,SERVICE_BOUND_NO_SYSTEM_INVARIANT,src/main/java/net/gtjaqh/pubdevops/mcp/K8sCtlTools.java:53
+k8sctl-exec-service-command,k8s-ctl 代理,yes,False,容器执行，可能通过容器凭据间接写集群,服务元数据、发布标签、实际 Pod/容器；引用还绑定用户/Pod UID/runtime,拒绝无关 Pod，但没有独立基础设施目标禁令；不能把服务归属等同于系统保护,SERVICE_BOUND_NO_SYSTEM_INVARIANT,src/main/java/net/gtjaqh/pubdevops/mcp/K8sCtlTools.java:76
+k8sctl-open-service-terminal,k8s-ctl 代理,yes,False,容器执行，可能通过容器凭据间接写集群,服务元数据、发布标签、实际 Pod/容器；引用还绑定用户/Pod UID/runtime,拒绝无关 Pod，但没有独立基础设施目标禁令；不能把服务归属等同于系统保护,SERVICE_BOUND_NO_SYSTEM_INVARIANT,src/main/java/net/gtjaqh/pubdevops/mcp/K8sCtlTools.java:99
+k8sctl-write-service-terminal,k8s-ctl 代理,yes,False,容器执行，可能通过容器凭据间接写集群,服务元数据、发布标签、实际 Pod/容器；引用还绑定用户/Pod UID/runtime,拒绝无关 Pod，但没有独立基础设施目标禁令；不能把服务归属等同于系统保护,SERVICE_BOUND_NO_SYSTEM_INVARIANT,src/main/java/net/gtjaqh/pubdevops/mcp/K8sCtlTools.java:117
+k8sctl-read-service-terminal,k8s-ctl 代理,yes,True,否,服务元数据、发布标签、实际 Pod/容器；引用还绑定用户/Pod UID/runtime,拒绝无关 Pod，但没有独立基础设施目标禁令；不能把服务归属等同于系统保护,SERVICE_BOUND_NO_SYSTEM_INVARIANT,src/main/java/net/gtjaqh/pubdevops/mcp/K8sCtlTools.java:136
+k8sctl-close-service-terminal,k8s-ctl 代理,yes,False,关闭会话/连接；无直接资源 CRUD,服务元数据、发布标签、实际 Pod/容器；引用还绑定用户/Pod UID/runtime,拒绝无关 Pod，但没有独立基础设施目标禁令；不能把服务归属等同于系统保护,SERVICE_BOUND_NO_SYSTEM_INVARIANT,src/main/java/net/gtjaqh/pubdevops/mcp/K8sCtlTools.java:156
+k8sctl-prepare-service-file-download,k8s-ctl 代理,yes,False,否；后续下载可能读取容器凭据，范围取决于目标与身份,服务元数据、发布标签、实际 Pod/容器；引用还绑定用户/Pod UID/runtime,拒绝无关 Pod，但没有独立基础设施目标禁令；不能把服务归属等同于系统保护,SERVICE_BOUND_NO_SYSTEM_INVARIANT,src/main/java/net/gtjaqh/pubdevops/mcp/K8sCtlTools.java:169
+k8sctl-prepare-service-file-upload,k8s-ctl 代理,yes,False,上传准备不写目标文件；后续 HTTP 上传写容器文件,服务元数据、发布标签、实际 Pod/容器；引用还绑定用户/Pod UID/runtime,拒绝无关 Pod，但没有独立基础设施目标禁令；不能把服务归属等同于系统保护,SERVICE_BOUND_NO_SYSTEM_INVARIANT,src/main/java/net/gtjaqh/pubdevops/mcp/K8sCtlTools.java:187
+query-namespace,查询与元数据,yes,True,否,服务 ID + 环境，由平台解析,只读，不执行 Kubernetes 资源写入,READ_ONLY,src/main/java/net/gtjaqh/pubdevops/mcp/NamespaceTools.java:34
+create-namespace,publish 原生集群写操作,yes,False,是,服务 ID + 环境，由平台解析,有环境/业务鉴权和服务归属；未发现不可被开放策略覆盖的系统目标保护；名称来自服务状态，不接受任意 Namespace 参数,SERVICE_BOUND_NO_SYSTEM_INVARIANT,src/main/java/net/gtjaqh/pubdevops/mcp/NamespaceTools.java:61
+probe-network-links,网络探测,yes,True,无 Kubernetes CRUD；向注册网络探测服务发请求,服务 ID + 环境，由平台解析,环境/系统范围由探测编排解析，目标是网络连通性，不是系统资源变更,NETWORK_READ,src/main/java/net/gtjaqh/pubdevops/mcp/NetworkProbeTools.java:26
+query-plan-list,查询与元数据,yes,True,否,服务 ID + 环境，由平台解析,只读，不执行 Kubernetes 资源写入,READ_ONLY,src/main/java/net/gtjaqh/pubdevops/mcp/PlanOptTools.java:33
+search-platform-knowledge,查询与元数据,yes,True,否,服务 ID + 环境，由平台解析,只读，不执行 Kubernetes 资源写入,READ_ONLY,src/main/java/net/gtjaqh/pubdevops/mcp/PlatformKnowledgeTools.java:19
+query-platform-knowledge,查询与元数据,yes,True,否,服务 ID + 环境，由平台解析,只读，不执行 Kubernetes 资源写入,READ_ONLY,src/main/java/net/gtjaqh/pubdevops/mcp/PlatformKnowledgeTools.java:34
+init-service-config,源配置变更,yes,False,无直接集群写入；改变后续部署输入,服务 ID + 环境，由平台解析,环境入口及配置业务授权；仅保存/初始化 Git 配置，不能据此保证后续 PodSpec 安全,INDIRECT_DEPLOY_INPUT,src/main/java/net/gtjaqh/pubdevops/mcp/ServiceConfigInitializationTools.java:41
+query-service-config-context,查询与元数据,yes,True,否,服务 ID + 环境，由平台解析,只读，不执行 Kubernetes 资源写入,READ_ONLY,src/main/java/net/gtjaqh/pubdevops/mcp/ServiceConfigTools.java:29
+query-service-config,查询与元数据,yes,True,否,服务 ID + 环境，由平台解析,只读，不执行 Kubernetes 资源写入,READ_ONLY,src/main/java/net/gtjaqh/pubdevops/mcp/ServiceConfigTools.java:40
+query-service-config-history,查询与元数据,yes,True,否,服务 ID + 环境，由平台解析,只读，不执行 Kubernetes 资源写入,READ_ONLY,src/main/java/net/gtjaqh/pubdevops/mcp/ServiceConfigTools.java:52
+query-chart-values-schema,查询与元数据,yes,True,否,服务 ID + 环境，由平台解析,只读，不执行 Kubernetes 资源写入,READ_ONLY,src/main/java/net/gtjaqh/pubdevops/mcp/ServiceConfigTools.java:66
+query-chart-deploy-context,查询与元数据,yes,True,否,服务 ID + 环境，由平台解析,只读，不执行 Kubernetes 资源写入,READ_ONLY,src/main/java/net/gtjaqh/pubdevops/mcp/ServiceConfigTools.java:74
+query-service-envvault-groups,查询与元数据,yes,True,否,服务 ID + 环境，由平台解析,只读，不执行 Kubernetes 资源写入,READ_ONLY,src/main/java/net/gtjaqh/pubdevops/mcp/ServiceConfigTools.java:82
+query-service-config-references,查询与元数据,yes,True,否,服务 ID + 环境，由平台解析,只读，不执行 Kubernetes 资源写入,READ_ONLY,src/main/java/net/gtjaqh/pubdevops/mcp/ServiceConfigTools.java:92
+validate-service-config,查询与元数据,yes,True,否,服务 ID + 环境，由平台解析,只读，不执行 Kubernetes 资源写入,READ_ONLY,src/main/java/net/gtjaqh/pubdevops/mcp/ServiceConfigTools.java:109
+check-service-config-render,查询与元数据,yes,True,否,服务 ID + 环境，由平台解析,只读，不执行 Kubernetes 资源写入,READ_ONLY,src/main/java/net/gtjaqh/pubdevops/mcp/ServiceConfigTools.java:118
+save-service-config,源配置变更,yes,False,无直接集群写入；改变后续部署输入,服务 ID + 环境，由平台解析,环境入口及配置业务授权；仅保存/初始化 Git 配置，不能据此保证后续 PodSpec 安全,INDIRECT_DEPLOY_INPUT,src/main/java/net/gtjaqh/pubdevops/mcp/ServiceConfigTools.java:127
+query-service-deploy-status,查询与元数据,yes,True,否,服务 ID + 环境，由平台解析,只读，不执行 Kubernetes 资源写入,READ_ONLY,src/main/java/net/gtjaqh/pubdevops/mcp/ServiceDeployTools.java:41
+deploy-service,publish 原生集群写操作,yes,False,是,服务 ID + 环境，由平台解析,有环境/业务鉴权和服务归属；未发现不可被开放策略覆盖的系统目标保护；自有 Helm 链不经过下层 Manifest 白名单，显式 Chart 主要校验名称/版本同时提供,SERVICE_BOUND_NO_SYSTEM_INVARIANT,src/main/java/net/gtjaqh/pubdevops/mcp/ServiceDeployTools.java:69
+query-service-diagnostics,查询与元数据,yes,True,否,服务 ID + 环境，由平台解析,只读，不执行 Kubernetes 资源写入,READ_ONLY,src/main/java/net/gtjaqh/pubdevops/mcp/ServiceDiagnosticsTools.java:28
+query-service-operations-document,查询与元数据,yes,True,否,服务 ID + 环境，由平台解析,只读，不执行 Kubernetes 资源写入,READ_ONLY,src/main/java/net/gtjaqh/pubdevops/mcp/ServiceOperationsDocumentTools.java:23
+update-service-operations-document,文档写入,yes,False,否；追加 Setting 运维文档,服务 ID + 环境，由平台解析,向登录用户开放文档不授权集群写入；保留版本和去重,DOCUMENT_WRITE,src/main/java/net/gtjaqh/pubdevops/mcp/ServiceOperationsDocumentTools.java:35
+search-publish-services,查询与元数据,yes,True,否,服务 ID + 环境，由平台解析,只读，不执行 Kubernetes 资源写入,READ_ONLY,src/main/java/net/gtjaqh/pubdevops/mcp/ServiceOptTools.java:26
+query-service-release-history,查询与元数据,yes,True,否,服务 ID + 环境，由平台解析,只读，不执行 Kubernetes 资源写入,READ_ONLY,src/main/java/net/gtjaqh/pubdevops/mcp/ServiceReleaseHistoryTools.java:33
+restart-service,publish 原生集群写操作,yes,False,是,服务 ID + 环境，由平台解析,有环境/业务鉴权和服务归属；未发现不可被开放策略覆盖的系统目标保护,SERVICE_BOUND_NO_SYSTEM_INVARIANT,src/main/java/net/gtjaqh/pubdevops/mcp/ServiceRestartTools.java:36
+scale-service,publish 原生集群写操作,yes,False,是,服务 ID + 环境，由平台解析,有环境/业务鉴权和服务归属；未发现不可被开放策略覆盖的系统目标保护；Deployment 必须在实际服务查询结果中,SERVICE_BOUND_NO_SYSTEM_INVARIANT,src/main/java/net/gtjaqh/pubdevops/mcp/ServiceScaleTools.java:40
+preview-service-deploy,查询与元数据,yes,True,否,服务 ID + 环境，由平台解析,只读，不执行 Kubernetes 资源写入,READ_ONLY,src/main/java/net/gtjaqh/pubdevops/mcp/ServiceVerificationTools.java:33
+verify-service-access,网络探测,yes,True,无 Kubernetes CRUD；访问服务所属 Ingress,服务 ID + 环境，由平台解析,校验服务归属及目标网络地址，不携带访问凭据、不跟随跳转,NETWORK_READ,src/main/java/net/gtjaqh/pubdevops/mcp/ServiceVerificationTools.java:42
+query-sql-check-rules,查询与元数据,yes,True,否,服务 ID + 环境，由平台解析,只读，不执行 Kubernetes 资源写入,READ_ONLY,src/main/java/net/gtjaqh/pubdevops/mcp/SqlCheckTools.java:24
+query-users,查询与元数据,yes,True,否,服务 ID + 环境，由平台解析,只读，不执行 Kubernetes 资源写入,READ_ONLY,src/main/java/net/gtjaqh/pubdevops/mcp/UserQueryTools.java:32

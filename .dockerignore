@@ -1,17 +1,27 @@
-.git
-.idea
-.vscode
-.codex
-.env
-.env.*
-.kube
-.local
-runtime
-data
-dist
-*.db
-*.db-*
-*.sqlite*
-*.log
-coverage.out
-configs/*.local.yaml
+# Allow only production build inputs. New docs/artifacts stay excluded by default.
+**
+!go.mod
+!go.sum
+!Dockerfile
+!.dockerignore
+
+!cmd
+cmd/**
+!cmd/main.go
+!cmd/pat
+cmd/pat/**
+!cmd/pat/*.go
+!internal
+internal/**
+!internal/**/*.go
+!pkg
+pkg/**
+!pkg/**/*.go
+
+# The runtime still needs one default config; local configs and secrets stay out.
+!configs
+configs/**
+!configs/config.container.yaml
+
+# Tests are run separately, not shipped to the production image builder.
+**/*_test.go

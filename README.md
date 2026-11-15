@@ -1,8 +1,18 @@
 # olixops-k8s-ctl
 
+当前联调分支临时关闭下层 Pod 执行权限检查：`pod-exec.authorization-enabled: false`，并关闭 `shell.interceptor.enabled`，用于通过 publish 验证 Shell、终端和文件传输。无需给 Pod 添加 `k8s-ctl/exec-enabled` 标签，也不读取静态 grants；宿主机共享、hostPath、privileged 和控制器自身 Pod 的资格策略同样暂不拦截。未配置该开关时默认继续执行原有检查，`diagnostics-only` 不允许关闭检查。身份认证、publish 原有业务权限、服务到 Pod 定位、容器状态、Pod UID、会话归属、文件单次引用和完整性校验继续生效；Kubernetes RBAC 和容器文件系统权限不受此开关改变。后续恢复权限控制时，将两项开关开启并实现独立策略，详见 [下一步待办](docs/roadmap.md)。
+
 `olixops-k8s-ctl` 是一个面向受控 Kubernetes 集群的控制服务。它把 Kubernetes 查询、清单校验、常用工作负载操作和 Helm 操作封装成 HTTP API 与 MCP 工具，服务默认监听本机回环地址，并通过固定的集群、Namespace、资源类型和参数边界降低误操作风险。
 
 当前版本已支持 **公司 RS256 JWT 与个人 PAT 认证**，REST 和 MCP 共用认证链路；PAT 支持个人创建、列表、撤销、到期与数据库有效性校验。认证为显式迁移开关：仓库示例仍为 `auth.enabled: false`，需准备密钥后开启，完整步骤见 [认证接入说明](docs/authentication.md)。开启认证时 MCP 使用 `/api/v1/mcp`，旧公开入口不注册。**资源级细粒度授权、审批和完整审计仍未实现**，Authorizer 仍默认放行；原有写开关、资源范围与 Kubernetes RBAC 继续生效。
+
+## publish 本地操作器接入（2026-11-13）
+
+Namespace 检查调整：已取消 publish 与 k8s-ctl 的静态 Namespace 名单限制；平台通过服务权限授权，按服务 ID 与环境解析目标 Namespace。认证、Pod 执行资格和会话归属仍保留。调整范围与验证见 [Namespace 与容器操作拦截清单](docs/namespace-interception-audit.md)。
+
+新增 `cmd/operator`：publish 从 `cluster_info` 读取加密 kubeconfig，经既有 EnvVault 模块解密后注册到本地控制器；业务集群无需部署 k8s-ctl。操作器按 clusterId 创建隔离运行实例，上层通过 `/clusters/{clusterId}/api/v1/...` 调用原有 HTTP 能力，对外仍由 publish 的 `/pubops/mcp` 提供日志、Shell、终端及文件工具。原 `cmd/main.go` 的单集群独立使用方式保留。
+
+当前 publish 开发目录固定为 `/Users/vincent/IdeaProjects/efficient-platform/publish-devops-api`，不再修改 tmp-code 中的旧版本。架构、内部注册认证、凭据边界、配置和验证范围见 [本地操作器接入](docs/platform-local-operator.md)；配置模板见 [平台操作器配置](configs/config.platform-operator.example.yaml)。下文历史“未实现多集群”和每集群部署方案指原独立入口，请以新增操作器说明为准。真实链路验收结果单独记录，不以工具可发现或编译通过代表集群验收通过。
 
 ## 当前功能清单
 
@@ -16,7 +26,7 @@
 | --- | --- | --- |
 | 集群与基础资源查询 | 查询集群版本、可见 Namespace、StorageClass、Namespace 下工作负载/Pod/Service/PVC 摘要、Gateway API 资源摘要 | [cluster_service.go](internal/application/cluster_service.go) |
 | 通用资源读取 | 按类型和名称读取资源详情，按 label 筛选与分页列举资源；读取白名单资源的原始 YAML，Namespace YAML 也可通过专用读取分支查询 | [operations.go](internal/infrastructure/kubernetes/operations.go) |
-| YAML 校验与部署 | 本地检查 YAML 结构、资源类型和 Namespace 范围；服务端 dry-run；通过 kubectl apply 创建或更新白名单资源，支持多文档清单 | [manifest.go](internal/application/manifest.go)、[operations.go](internal/application/operations.go) |
+| YAML 校验与部署 | 本地检查 YAML 结构、资源类型和请求目标 Namespace 一致性；服务端 dry-run；通过 kubectl apply 创建或更新白名单资源，支持多文档清单 | [manifest.go](internal/application/manifest.go)、[operations.go](internal/application/operations.go) |
 | Namespace 管理 | 列表、创建、删除；增改 labels/annotations，显式删除指定元数据键；元数据接口不允许修改其他关键字段；保护 `default`、`kube-*` 不被删除 | [operations.go](internal/application/operations.go) |
 | 工作负载操作 | Deployment/StatefulSet 扩缩容（含缩到 0）；Deployment/StatefulSet/DaemonSet 重启、指定修订回滚、rollout 状态快照和历史修订查询 | [operations.go](internal/application/operations.go)、[history.go](internal/infrastructure/kubernetes/history.go) |
 | Pod、事件与排障 | Pod 详情与 YAML、单 Pod 删除；查询容器日志，支持尾部行数、时间范围、上一容器和时间戳；按资源筛选事件并分页 | [operations.go](internal/infrastructure/kubernetes/operations.go) |
@@ -54,7 +64,7 @@ Pod/Deployment 等白名单资源的创建和一般更新走通用 YAML apply，
 | REST 接入 | `/api/v1/pub` 提供健康/就绪检查，`/api/v1/cluster` 覆盖资源、工作负载、Helm、日志、Shell、终端与文件；`/api/v1/templates`、`/services`、`/ports` 提供目录操作；**57 个 MCP 业务工具均有 HTTP 对应入口**，另有文件流与实例能力查询 |
 | 操作器接入 | `http.enabled` 默认开启；可关闭主 MCP，通过认证 HTTP 独立执行。`/api/v1/operator/capabilities` 返回 clusterId、runtimeId 和实际能力；详见 [操作器指南](docs/http-operator-guide.md) |
 | 连接集群 | 本地 kubeconfig 文件和 InCluster ServiceAccount 两种可用 Provider，当前只控制服务配置的一个集群 |
-| 功能边界 | Namespace 范围、固定资源类型、参数与大小限制、超时、MCP 写工具注册开关、Kubernetes 写操作开关；所有操作保留 Authorizer 扩展点 |
+| 功能边界 | Namespace 格式与目标一致性、固定资源类型、参数与大小限制、超时、MCP 写工具注册开关、Kubernetes 写操作开关；所有操作保留 Authorizer 扩展点 |
 | 日志与错误 | `pkg/logger`、请求 ID 透传/回写、统一 REST 响应；MCP 使用标准协议结果；目录业务错误提供 reason，端口事件与部署阶段持久化 |
 | 部署交付 | Dockerfile、容器配置、ConfigMap/Secret 文件挂载、单副本 SQLite PVC、ServiceAccount/RBAC 示例、Higress `/k8sctl` 前缀 Ingress；配置修改后需重启 |
 | 自动化验证 | 模拟 Kubernetes API、CLI 子进程、SQLite 与本地协议端点测试，覆盖 HTTP/MCP 契约、资源边界、幂等、端口并发、失败恢复、UID 删除和沙箱回收 |
@@ -362,6 +372,8 @@ sequenceDiagram
 
 ## 打包部署
 
+平台下层控制器的独立部署包位于 [deployments/platform](deployments/platform/README.md)，与旧 `catalog.yaml` 分开。默认入口启用 JWT 认证 HTTP、资源写操作与 Helm；完整入口增加 Shell/终端/文件及 Catalog。两种入口均使用 InCluster ServiceAccount、独立 `olixops-platform` Namespace，主 MCP 默认关闭，用户权限由 `publish-devops-api` 在调用前检查。先准备平台公钥 Secret、替换镜像和 Namespace/RBAC，再选择 `kubectl apply -k deployments/platform` 或 `deployments/platform/full`；配置说明、接入检查脚本与迁移注意事项见包内 README。
+
 在项目根目录执行；首次推送或登录过期时先登录 Harbor：
 
 ```bash
@@ -377,6 +389,8 @@ docker buildx build \
 ```
 
 `BASE_IMAGE_REGISTRY` 指定基础镜像仓库前缀，`GOPROXY` 指定构建阶段的 Go 模块代理。`--push` 构建后直接推送到 Harbor。
+
+构建上下文采用 [.dockerignore](.dockerignore) 白名单：只允许服务/PAT 入口、`internal`/`pkg` 生产 Go 源码、`go.mod`/`go.sum` 和容器默认配置进入。Agent 文档、README、测试记录、测试源码、其他本地配置和本地产物均排除；运行镜像只包含二进制、CLI 与必要配置。模块下载、Go 编译和运行依赖分别缓存，两个二进制合并编译。常规构建复用同一个 buildx builder，避免使用 `--no-cache`；首次下载和编译仍需时间。详见 [构建内容与缓存](docs/container-deployment.md#构建内容与缓存)。
 
 ## 快速启动
 
@@ -409,7 +423,6 @@ kubernetes:
     reference: ""  # database Provider 的记录引用
     context: ""
   write-enabled: true
-  allowed-namespaces: []
 mcp:
   enabled: true
   write-enabled: true
@@ -467,9 +480,9 @@ REST 遵循项目约定：查询使用 GET，带参数操作使用 POST，不使
 | GET | `/api/v1/cluster/status` | 集群版本和可见 Namespace 数量 | Control API key |
 | GET | `/api/v1/cluster/namespaces` | Namespace 列表 | Control API key |
 | GET | `/api/v1/cluster/storage-classes` | StorageClass 摘要 | Control API key |
-| GET | `/api/v1/cluster/namespaces/{namespace}/resources` | Deployment、StatefulSet、Pod、Service、PVC 摘要 | Control API key + Namespace 范围 |
-| GET | `/api/v1/cluster/namespaces/{namespace}/gateway-resources` | Gateway API 资源摘要 | Control API key + Namespace 范围 |
-| POST | `/api/v1/cluster/namespaces/{namespace}/metadata` | 更新 Namespace 的 labels 和 annotations | Control API key + 写开关 + Namespace 范围 |
+| GET | `/api/v1/cluster/namespaces/{namespace}/resources` | Deployment、StatefulSet、Pod、Service、PVC 摘要 | Control API key + 目标参数校验 |
+| GET | `/api/v1/cluster/namespaces/{namespace}/gateway-resources` | Gateway API 资源摘要 | Control API key + 目标参数校验 |
+| POST | `/api/v1/cluster/namespaces/{namespace}/metadata` | 更新 Namespace 的 labels 和 annotations | Control API key + 写开关 + 目标参数校验 |
 | POST | `/api/v1/cluster/kubectl/apply` | 校验并执行 kubectl apply，可 server-side dry-run | Control API key + 写开关 |
 | POST | `/api/v1/cluster/helm/upgrade` | Helm upgrade/install，带 chart 预检查 | Control API key + 写开关 |
 
@@ -507,7 +520,7 @@ http://127.0.0.1:8091/api/v1/pub/mcp
 
 目录开启时另有 12 个读工具和 9 个写工具，完整开启共 **50 个工具（28 读、22 写）**。可选启用 Kubernetes MCP Server 桥接后增加 `exec_pod_command`，为 **51 个（28 读、23 写）**。新增模板/配置/端口与标准部署工具的清单、参数和状态机见 [标准服务目录](docs/standard-services.md)。
 
-`MCP_WRITE_ENABLED=true` 注册写工具；集群变更还需 `KUBERNETES_WRITE_ENABLED=true`。模板/配置/台账数据库写入不依赖 Kubernetes 写开关。工具开关、固定资源白名单、Namespace 范围和参数校验属于功能边界，不等于调用者授权。JWT/PAT 已识别调用者，但当前通用 `Authorizer` 仍默认允许调用；开发人员诊断专用模式另强制精确用户 grant，其他资源尚未实现用户隔离。日志、事件、资源 status 和 Pod 日志可能含有业务敏感信息。
+`MCP_WRITE_ENABLED=true` 注册写工具；集群变更还需 `KUBERNETES_WRITE_ENABLED=true`。模板/配置/台账数据库写入不依赖 Kubernetes 写开关。工具开关、固定资源白名单和参数校验属于功能边界，不等于调用者授权。JWT/PAT 已识别调用者，但当前通用 `Authorizer` 仍默认允许调用；开发人员诊断专用模式另强制精确用户 grant，其他资源尚未实现用户隔离。日志、事件、资源 status 和 Pod 日志可能含有业务敏感信息。
 
 资源白名单、Helm 预渲染规则、分页、日志限制、回滚语义和完整 JSON 示例见 [MCP 开发文档](docs/mcp-development.md)。
 
@@ -534,7 +547,7 @@ Helm 只接受受控的 `repo/chart` 或 `oci://...` 形式，先下载并渲染
 - kubeconfig 只能由 `internal/infrastructure/kubeconfig.Provider` 提供；文件 Provider 默认读取 `~/.kube/config`，InCluster Provider 使用当前 Pod 的 ServiceAccount。数据库 Provider 目前只有接口，未来必须负责加密存储、权限校验和轮换。
 - kubeconfig、token、证书、Helm values 和完整 YAML 不写入日志；CLI 使用 0600 临时文件并在操作结束后清理。
 - `kubectl`/Helm 通过 `exec.CommandContext` 的参数数组调用，调用方不能拼接参数绕过白名单。
-- `allowed-namespaces: []` 的历史语义是允许全部 Namespace，不能把它当作生产环境默认拒绝策略。
+- 静态 `allowed-namespaces` 已废弃，旧字段兼容读取但不生效；平台按服务权限授权并解析 Namespace。独立下层接口仍接收目标 Namespace，访问范围由授权扩展及 Kubernetes RBAC 约束。
 - 当前服务只有单集群别名 `configured`，请求不能选择任意集群或连接地址。
 - `domain.Authorizer` 已在所有 REST/MCP 写操作及主要读操作前接入，JWT/PAT 身份已接入，后续可实现 action、集群、Namespace、kind/name、内容策略、审批和审计。设计细节见 [权限控制设计](docs/mcp-authorization-design.md)。
 
@@ -588,6 +601,24 @@ git diff --check
 
 ## 文档索引
 
+- [权限测试后修复与复测](docs/testing/publish-permission-fixes-2026-11-14.md)：publish HTTP 错误状态按实际错误码返回、k8sctl 代理明确不支持灵雀云、开发环境 Shell 保持开放；150 项回归与 10 项真实检查。
+
+- [publish / k8s-ctl 权限实测](docs/testing/publish-permissions-10121993-2026-11-14.md)：真实用户 10121993 的允许、拒绝、身份伪造、服务 Pod 边界、终端与文件验证；41 项场景、166 项自动化结果，以及 HTTP 状态码、能力声明和未覆盖场景。另附 [CSV 清单](docs/testing/publish-permissions-10121993-2026-11-14.csv)。
+
+- [HTTP / MCP 逐工具真实验收矩阵](docs/testing/k8sctl-http-mcp-tool-matrix-2026-11-14.md)：57 个工具逐项对照；publish 目标解析、操作器 36 工具双入口实测、上层 8 个代理的证据范围、事件旧游标错误分类问题及未启用/跳过项目。另附 [CSV 清单](docs/testing/k8sctl-http-mcp-tool-matrix-2026-11-14.csv)。
+
+- [publish MCP 生命周期验收清单](docs/testing/publish-service-lifecycle-2963078505-2026-11-14.md)：服务 2963078505 仿真环境的停启、卸载、原版本安装、15 项通过证据及预览/滚动重启能力限制。
+
+- [环境常量与系统资源扩展检查](docs/testing/mcp-system-resource-extended-audit-2026-11-15.md)：权限表达式、Mapper、旧 HTTP/WS、公开 MCP 认证及文件流检查；附修复和安全复现结果。
+
+- [MCP 系统资源全量审计](docs/testing/mcp-system-resource-audit-2026-11-15.md)：publish 55 个与 k8s-ctl 57 个工具逐项检查；当前仍缺独立系统资源写保护，附两份 CSV 和非破坏性验证范围。
+
+- [MCP 功能清单](docs/mcp-tool-inventory.md)：按当前源码核对的 57 个工具、读写分类、开关条件、资源范围，以及与 publish 上层 MCP 的区别。
+
+- [实际排查案例：Nginx 配置与 Chart 版本适配](docs/troubleshooting/case-8824195328-sim-nginx-chart-version.md)：服务 8824195328 仿真环境的现象、MCP 调用、排查过程、工具优先级、版本比较、解决建议和验收边界；供后续 AI 复用。
+
+- [publish-devops-api 接入方案](docs/publish-devops-integration.md)：已确认的上层平台、源码现状、完整能力配置、可信身份、HTTP/MCP、终端/文件及实施顺序。
+
 - [开发交接文档](docs/developer-handover.md)：新同事接手的架构、功能、启动验证、开发落点和后续阶段。
 
 - [HTTP 操作器指南](docs/http-operator-guide.md)：独立/操作器配置、curl、终端与文件传输、错误和兼容。
@@ -618,7 +649,7 @@ git diff --check
 {"software":"mongodb","namespace":"wx-test-ns-001","requestId":"mongo-demo-20261026-01"}
 ```
 
-用户可以说“在 wx-test-ns-001 部署一个 Milvus”或“在 wx-test-ns-002 开一个保留一小时的 Python 沙箱”。Namespace 必须由用户指定；缺少时客户端提示“请指定部署目标 Namespace”，服务端返回 MISSING_NAMESPACE 且不保存/分配端口。指定的 Namespace 不存在时，实际部署自动创建；创建受白名单、写开关和现有权限约束，不自动绑定 RBAC。客户端根据工具 Schema 调用，生成唯一 requestId，失败重试沿用同一值与参数。服务端使用默认 owner/StorageClass/资源规格，自动分配可用 Higress TCP 端口，返回实例、部署与访问地址。完整参数、首批规格、沙箱回收、重试与验收边界见 [常用服务使用说明](docs/standard-service-quickstart.md)。本次代码新增两个工具；线上原 48 工具实例需升级镜像后才可发现新入口。
+用户可以说“在 wx-test-ns-001 部署一个 Milvus”或“在 wx-test-ns-002 开一个保留一小时的 Python 沙箱”。Namespace 必须由用户指定；缺少时客户端提示“请指定部署目标 Namespace”，服务端返回 MISSING_NAMESPACE 且不保存/分配端口。指定的 Namespace 不存在时，实际部署自动创建；创建受资源类型限制、写开关和现有权限约束，不自动绑定 RBAC。客户端根据工具 Schema 调用，生成唯一 requestId，失败重试沿用同一值与参数。服务端使用默认 owner/StorageClass/资源规格，自动分配可用 Higress TCP 端口，返回实例、部署与访问地址。完整参数、首批规格、沙箱回收、重试与验收边界见 [常用服务使用说明](docs/standard-service-quickstart.md)。本次代码新增两个工具；线上原 48 工具实例需升级镜像后才可发现新入口。
 
 
 ## 主 MCP 单次 Shell 命令
@@ -631,7 +662,7 @@ git diff --check
 
 新增 MCP `exec_pod_command`：`namespace/pod/container/action/timeoutSeconds`，保留固定动作 `redis_ping`、`nginx_check`、`disk_usage`、`process_list`，并可显式开启 `action: shell` 单次任意命令；无交互式 stdin 或 TTY。新增 REST `POST /api/v1/cluster/pods/logs`（复用日志能力）与可选 `POST /api/v1/cluster/pods/exec`。输出保留上游原文及错误标记，不虚构独立 stdout/stderr 或退出码。
 
-默认 `pod-exec.enabled=false`。启用要求 JWT/PAT、Kubernetes 写开关、HTTP 或可写主 MCP 入口、明确业务 Namespace；sidecar 使用 in-cluster，managed 使用同源 Provider 快照。目标需 Pod 标签 `k8s-ctl/exec-enabled: "true"` 和目标 Namespace 的 `get/create pods/exec` RBAC。执行仍走 `pod.exec` Authorizer 扩展点，默认 Authorizer 尚未实现逐用户资源隔离。超时或传输中断可能结果不确定，不自动重试。
+默认 `pod-exec.enabled=false`。启用要求 JWT/PAT、Kubernetes 写开关、HTTP 或可写主 MCP 入口、明确业务 Namespace；sidecar 使用 in-cluster，managed 使用同源 Provider 快照。目标授权开启时需 Pod 标签 `k8s-ctl/exec-enabled: "true"` 或精确 Pod UID grant；联调显式设置 `pod-exec.authorization-enabled=false` 时跳过该策略。目标 Namespace 的 Kubernetes RBAC 仍需允许读取 Pod 和创建 pods/exec。执行仍走 `pod.exec` Authorizer 扩展点，默认 Authorizer 尚未实现逐用户资源隔离。超时或传输中断可能结果不确定，不自动重试。
 
 完整配置、权限边界及返回语义见 [接入说明](docs/kubernetes-mcp-integration.md)，源码从 [执行用例](internal/application/pod_exec.go) 与 [上游适配器](internal/infrastructure/k8smcp/client.go) 阅读。`kubectl kustomize deployments` 可本地生成含 sidecar 的部署包，`deployments/catalog.yaml` 保持默认单主容器；RBAC 示例需独立审核应用。主镜像需包含本次代码，认证密钥需由 Secret 注入。本次未拉取镜像或操作真实集群。
 

@@ -78,7 +78,7 @@ func TestTerminalAndBinaryDownloadThroughMainMCP(t *testing.T) {
 	manager := sessions.NewManager(time.Minute, time.Hour, 4, 2)
 	defer manager.Close()
 	backend := &terminalBackend{file: []byte{0, 1, 255, 128, 10, 0}}
-	service := application.NewClusterService(client, nil, f.cfg.Kubernetes, application.WithPodExecutor(&countingExecutor{}, []string{"demo"}), application.WithShell(true, true, interceptor.AllowAll{}), application.WithTerminals(backend, manager))
+	service := application.NewClusterService(client, nil, f.cfg.Kubernetes, application.WithPodExecutor(&countingExecutor{}), application.WithShell(true, true, interceptor.AllowAll{}), application.WithTerminals(backend, manager))
 	engine, err := router.NewWithAuth(f.cfg, service, nil, f.service)
 	require.NoError(t, err)
 	httpServer := httptest.NewServer(engine)

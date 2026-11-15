@@ -1,0 +1,33 @@
+# Helm default release storage uses Secrets. This grants all Secrets in this namespace.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: olixops-k8s-ctl-platform-helm
+  namespace: developer-demo
+rules:
+- apiGroups:
+  - ''
+  resources:
+  - secrets
+  verbs:
+  - get
+  - list
+  - watch
+  - create
+  - update
+  - patch
+  - delete
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: olixops-k8s-ctl-platform-helm
+  namespace: developer-demo
+subjects:
+- kind: ServiceAccount
+  name: olixops-k8s-ctl-platform
+  namespace: olixops-platform
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: olixops-k8s-ctl-platform-helm

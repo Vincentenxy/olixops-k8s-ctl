@@ -72,7 +72,7 @@ func TestUploadFailureUnblocksStalledBody(t *testing.T) {
 	defer manager.Close()
 	backend := &reviewFailedReceive{waiting: make(chan struct{}), failed: make(chan struct{})}
 	service := application.NewClusterService(operatorClient(t, f.cfg.Kubernetes, upstream.URL), nil, f.cfg.Kubernetes,
-		application.WithPodExecutor(&countingExecutor{}, []string{"demo"}), application.WithShell(true, true, interceptor.AllowAll{}), application.WithTerminals(backend, manager))
+		application.WithPodExecutor(&countingExecutor{}), application.WithShell(true, true, interceptor.AllowAll{}), application.WithTerminals(backend, manager))
 	ticket, err := service.UploadPodFile(auth.WithPrincipal(context.Background(), auth.Principal{UserID: "wx-user"}), domain.UploadInput{TerminalTarget: domain.TerminalTarget{Namespace: "demo", Pod: "app", Container: "app"}, Path: "/tmp/file.bin"})
 	require.NoError(t, err)
 	engine, err := router.NewWithAuth(f.cfg, service, nil, f.service)

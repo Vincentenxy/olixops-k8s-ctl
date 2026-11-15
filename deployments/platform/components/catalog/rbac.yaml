@@ -1,0 +1,48 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: olixops-k8s-ctl-platform-gateway
+  namespace: higress-system
+rules:
+- apiGroups:
+  - ''
+  resources:
+  - services
+  resourceNames:
+  - higress-gateway
+  verbs:
+  - get
+  - update
+  - patch
+- apiGroups:
+  - gateway.networking.k8s.io
+  resources:
+  - gateways
+  resourceNames:
+  - higress-tcp-gateway
+  verbs:
+  - update
+  - patch
+- apiGroups:
+  - gateway.networking.k8s.io
+  resources:
+  - gateways
+  - httproutes
+  - tcproutes
+  verbs:
+  - get
+  - list
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: olixops-k8s-ctl-platform-gateway
+  namespace: higress-system
+subjects:
+- kind: ServiceAccount
+  name: olixops-k8s-ctl-platform
+  namespace: olixops-platform
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: olixops-k8s-ctl-platform-gateway

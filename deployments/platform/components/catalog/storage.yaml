@@ -1,0 +1,17 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: olixops-k8s-ctl-platform
+  namespace: olixops-platform
+spec:
+  template:
+    spec:
+      containers:
+        - name: controller
+          volumeMounts:
+            - name: catalog
+              mountPath: /data
+      volumes:
+        - name: catalog
+          persistentVolumeClaim:
+            claimName: olixops-k8s-ctl-platform-data

@@ -13,7 +13,7 @@
 
 业务 ClusterRole 通过 `wx-test-ns-001`、`wx-test-ns-002` 中各自的 RoleBinding 绑定，不会给其他 Namespace 授予业务资源写权限。控制服务自身所在的 `olixops` 未绑定该业务角色。新业务 Namespace 可以通过 MCP `create_namespace` 创建；创建后仍需管理员为其添加同样的 RoleBinding，才能部署业务资源。修改 RoleBinding 的 `metadata.namespace`，subject 的 Namespace 始终保留 `olixops`。
 
-Namespace 创建属于集群级权限，Kubernetes RBAC 无法使用 `resourceNames` 限制 create 请求的名称或前缀。应用仍执行名称校验、Namespace 白名单和 Kubernetes 写开关检查；当前部署白名单为空，表示不限制名称范围。如需限定创建目标，需配置应用白名单或接入准入策略。
+Namespace 创建属于集群级权限，Kubernetes RBAC 无法使用 `resourceNames` 限制 create 请求的名称或前缀。应用仍执行名称校验、Kubernetes 写开关与 Authorizer 检查；静态 Namespace 名单已取消。如需限定创建目标，由平台服务权限、授权扩展或准入策略实现。
 
 基础文件不包含 Namespace 更新/删除、RBAC 修改、节点/CRD 管理、Pod exec 或 Secret 写入。Helm 默认将 release 存储在 Secret 中，需要额外的 Secret list/create/update/delete 等权限；当前基础文件没有授予这些权限，因此不能认为所有 Helm 工具都已可用。新增权限应按实际业务 Namespace 和 Chart 资源补充。
 
@@ -64,8 +64,8 @@ kubectl auth can-i create clusterrolebindings.rbac.authorization.k8s.io \
 
 最后通过 MCP 调用 `cluster_status`、`list_namespaces`、`list_resources(namespace="wx-test-ns-001")`，确认真实访问；调用 `sync_gateway_ports` 会读取共享入口并更新 SQLite 台账。这里只做授权，不会自动部署业务服务。
 
-如需在应用层也收紧 Namespace 范围，可在部署 ConfigMap 中设置 `kubernetes.allowed-namespaces: [wx-test-ns-001, wx-test-ns-002, higress-system]`，应用配置修改后需重启；基础 RBAC 本身已经限制 Kubernetes 写操作范围。后续增加业务 Namespace 时，应用白名单与 RoleBinding 都要相应调整。
+应用不再维护 Namespace 名单，旧 allowed-namespaces 配置不生效；平台按服务权限限定业务目标。基础 RBAC 本身限制 Kubernetes 操作范围，后续增加业务 Namespace 时按需调整 RoleBinding。
 
 原理与对象作用域见 [Kubernetes RBAC 官方文档](https://kubernetes.io/docs/reference/access-authn-authz/rbac/)。
 
-标准服务部署要求显式指定 Namespace；执行部署时读取该 Namespace，只有 NotFound 才尝试创建。已有的 namespace-creator ClusterRole 提供创建权限，但不会自动给新 Namespace 绑定 workloads 角色。新 Namespace 内业务资源权限须由管理员配置；自动创建不绕过 allowed-namespaces、写开关或 Authorizer。失败后保留 Namespace，不随实例删除。
+标准服务部署要求显式指定 Namespace；执行部署时读取该 Namespace，只有 NotFound 才尝试创建。已有的 namespace-creator ClusterRole 提供创建权限，但不会自动给新 Namespace 绑定 workloads 角色。新 Namespace 内业务资源权限须由管理员配置；自动创建不绕过写开关、Authorizer 或 Kubernetes RBAC。失败后保留 Namespace，不随实例删除。

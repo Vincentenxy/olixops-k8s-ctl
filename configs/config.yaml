@@ -16,7 +16,6 @@ kubernetes:
     reference: ""
     context: ""
   write-enabled: true
-  allowed-namespaces: []
   command-timeout-seconds: 120
   kubectl: kubectl
   helm: helm
@@ -46,6 +45,7 @@ auth:
 
 # Local managed bridge; requires JWT/PAT, Kubernetes writes and an HTTP or writable MCP entry.
 pod-exec:
+  authorization-enabled: false # Temporary integration testing; restore true with the permission model
   enabled: true
   mode: managed
   binary: /Users/vincent/Desktop/codes.nosync/olixops-k8s-ctl/.local/kubernetes-mcp-bin/kubernetes-mcp-server
@@ -69,7 +69,6 @@ pod-exec:
       pod-uid: 65cd0ceb-990b-4ceb-ad52-ad71f4706cd4 # Temporary test Pod; remove after cleanup.
       actions: [shell, logs, download_file, upload_file]
   endpoint: http://127.0.0.1:8082/mcp
-  allowed-namespaces: [env-vault]
 
 mcp:
   diagnostics-only: false # Enable for developer-facing log/exec-only service.
@@ -99,7 +98,7 @@ shell:
     max-per-user: 4
   enabled: true
   interceptor:
-    enabled: true
+    enabled: false # Temporary integration testing
     provider: allow-all
 
 # Ordinary HTTP operations; file streams remain available to enabled MCP tools.

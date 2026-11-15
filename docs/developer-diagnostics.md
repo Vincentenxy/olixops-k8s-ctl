@@ -43,7 +43,6 @@ pod-exec:
   enabled: true
   mode: sidecar
   endpoint: http://127.0.0.1:8082/mcp
-  allowed-namespaces: [env-vault]
   grants:
     - user-id: VERIFIED_COMPANY_USER_ID
       namespace: env-vault

@@ -16,13 +16,9 @@ import (
 	"olixops-k8s-ctl/pkg/logger"
 )
 
-func WithPodExecutor(backend domain.PodExecutor, namespaces []string) ServiceOption {
+func WithPodExecutor(backend domain.PodExecutor) ServiceOption {
 	return func(s *ClusterService) {
 		s.podExecutor = backend
-		s.execNamespaces = map[string]bool{}
-		for _, ns := range namespaces {
-			s.execNamespaces[ns] = true
-		}
 	}
 }
 
@@ -48,9 +44,6 @@ func (s *ClusterService) ExecPodCommand(ctx context.Context, in domain.PodExecIn
 	}()
 	if s.podExecutor == nil {
 		return out, fault.Disabled("Pod exec disabled")
-	}
-	if !s.execNamespaces[in.Namespace] || in.Namespace == "default" || in.Namespace == "olixops" || strings.HasPrefix(in.Namespace, "kube-") {
-		return out, fault.Forbidden("exec namespace not allowed")
 	}
 	target, err := s.namedTarget(in.Namespace, "Pod", in.Pod)
 	if err != nil {

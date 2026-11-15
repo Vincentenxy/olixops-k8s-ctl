@@ -25,23 +25,15 @@ type ClusterService struct {
 	diagnosticGrantsEnabled bool
 	diagnosticGrants        []domain.DiagnosticGrant
 	podExecutor             domain.PodExecutor
-	execNamespaces          map[string]bool
 	client                  *clusterk8s.Client
 	runner                  *execctl.Runner
 	writeEnabled            bool
-	allowedNS               map[string]struct{}
 	authorizer              domain.Authorizer
 	cluster                 string
 }
 
 func NewClusterService(client *clusterk8s.Client, runner *execctl.Runner, cfg config.KubernetesConfig, options ...ServiceOption) *ClusterService {
-	allowed := make(map[string]struct{}, len(cfg.AllowedNamespaces))
-	for _, namespace := range cfg.AllowedNamespaces {
-		if trimmed := strings.TrimSpace(namespace); trimmed != "" {
-			allowed[trimmed] = struct{}{}
-		}
-	}
-	service := &ClusterService{client: client, runner: runner, writeEnabled: cfg.WriteEnabled, allowedNS: allowed, authorizer: domain.DeferredAuthorizer{}, cluster: "configured"}
+	service := &ClusterService{client: client, runner: runner, writeEnabled: cfg.WriteEnabled, authorizer: domain.DeferredAuthorizer{}, cluster: "configured"}
 	for _, option := range options {
 		option(service)
 	}
@@ -52,38 +44,14 @@ func (s *ClusterService) Status(ctx context.Context) (clusterk8s.ClusterStatus, 
 	if err := s.authorize(ctx, "cluster.read", false, nil, nil); err != nil {
 		return clusterk8s.ClusterStatus{}, err
 	}
-	status, err := s.client.Status(ctx)
-	if err != nil {
-		return status, err
-	}
-	if len(s.allowedNS) > 0 {
-		namespaces, err := s.ListNamespaces(ctx)
-		if err != nil {
-			return status, err
-		}
-		status.Namespaces = len(namespaces)
-	}
-	return status, nil
+	return s.client.Status(ctx)
 }
 
 func (s *ClusterService) ListNamespaces(ctx context.Context) ([]clusterk8s.NamespaceSummary, error) {
 	if err := s.authorize(ctx, "namespace.list", false, nil, nil); err != nil {
 		return nil, err
 	}
-	items, err := s.client.ListNamespaces(ctx)
-	if err != nil {
-		return nil, err
-	}
-	if len(s.allowedNS) == 0 {
-		return items, nil
-	}
-	filtered := make([]clusterk8s.NamespaceSummary, 0, len(items))
-	for _, item := range items {
-		if s.namespaceAllowed(item.Name) {
-			filtered = append(filtered, item)
-		}
-	}
-	return filtered, nil
+	return s.client.ListNamespaces(ctx)
 }
 
 func (s *ClusterService) ListStorageClasses(ctx context.Context) ([]clusterk8s.StorageClassSummary, error) {
@@ -120,7 +88,7 @@ func (s *ClusterService) ApplyManifest(ctx context.Context, manifest, namespace 
 	if err := s.requireNamespace(namespace); err != nil {
 		return execctl.Result{}, nil, err
 	}
-	resources, err := ValidateManifest(manifest, namespace, s.allowedNS)
+	resources, err := ValidateManifest(manifest, namespace)
 	if err != nil {
 		return execctl.Result{}, nil, err
 	}
@@ -146,22 +114,8 @@ func (s *ClusterService) HelmUpgrade(ctx context.Context, release, chart, namesp
 	return s.UpgradeHelm(ctx, HelmUpgradeInput{Namespace: namespace, Release: release, Chart: chart, ValuesYAML: valuesYAML, Wait: wait})
 }
 
-func (s *ClusterService) namespaceAllowed(namespace string) bool {
-	if len(s.allowedNS) == 0 {
-		return true
-	}
-	_, ok := s.allowedNS[namespace]
-	return ok
-}
-
 func (s *ClusterService) requireNamespace(namespace string) error {
-	if err := validateName(namespace, "namespace"); err != nil {
-		return err
-	}
-	if !s.namespaceAllowed(namespace) {
-		return fault.Forbidden("namespace is not allowed by the configured scope")
-	}
-	return nil
+	return validateName(namespace, "namespace")
 }
 
 func validateName(value, field string) error {
@@ -184,7 +138,7 @@ func (s *ClusterService) ValidateManifest(ctx context.Context, manifest, namespa
 	if err := s.authorize(ctx, "manifest.validate", false, []domain.Target{{Namespace: namespace, Kind: "*"}}, manifest); err != nil {
 		return nil, err
 	}
-	return ValidateManifest(manifest, namespace, s.allowedNS)
+	return ValidateManifest(manifest, namespace)
 }
 
 func (s *ClusterService) GetRolloutStatus(ctx context.Context, namespace, kind, name string) (clusterk8s.RolloutStatus, error) {

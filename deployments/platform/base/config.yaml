@@ -1,0 +1,57 @@
+# Resource/Helm controller. Replace cluster ID, JWT claims and business namespace.
+app:
+  name: k8s-ctl
+  version: 0.2.0
+server:
+  host: 0.0.0.0
+  port: 8091
+  mode: release
+  public-url: "" # Relative transfer paths; the upper platform owns its public URL.
+http:
+  enabled: true
+mcp:
+  enabled: false
+  write-enabled: true
+  diagnostics-only: false
+cluster:
+  id: poc
+auth:
+  enabled: true
+  company:
+    enabled: true
+    issuer: publish-devops-api
+    audience: k8s-ctl:poc
+    key-id: platform-v1
+    public-key-file: /var/run/k8s-ctl-auth/platform-public.pem
+  pat:
+    enabled: false
+kubernetes:
+  in-cluster: true
+  write-enabled: true
+  command-timeout-seconds: 120
+  kubectl: kubectl
+  helm: helm
+  kubeconfig:
+    source: file
+pod-exec:
+  enabled: false
+  mode: sidecar
+  endpoint: http://127.0.0.1:8082/mcp
+  grants: []
+shell:
+  enabled: false
+  interceptor:
+    enabled: true
+    provider: allow-all
+catalog:
+  enabled: false
+  cluster: poc
+  database-path: /data/olixops.db
+  default-owner: platform
+  default-storage-class: local-path
+  gateway-id: higress
+  gateway-namespace: higress-system
+  gateway-service: higress-gateway
+  gateway-name: higress-tcp-gateway
+  port-start: 30000
+  port-end: 30200

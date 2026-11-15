@@ -19,7 +19,7 @@ type ManifestResource struct {
 	Name       string `json:"name"`
 }
 
-func ValidateManifest(manifest, requestedNamespace string, allowedNamespaces map[string]struct{}) ([]ManifestResource, error) {
+func ValidateManifest(manifest, requestedNamespace string) ([]ManifestResource, error) {
 	if len(validation.IsDNS1123Label(requestedNamespace)) > 0 {
 		return nil, fault.Invalid("invalid namespace")
 	}
@@ -67,11 +67,6 @@ func ValidateManifest(manifest, requestedNamespace string, allowedNamespaces map
 		}
 		if namespace != requestedNamespace {
 			return nil, fault.Invalid("manifest resource %s/%s targets namespace %q, expected %q", kind, name, namespace, requestedNamespace)
-		}
-		if len(allowedNamespaces) > 0 {
-			if _, ok := allowedNamespaces[namespace]; !ok {
-				return nil, fault.Forbidden("manifest namespace is not allowed")
-			}
 		}
 		resources = append(resources, ManifestResource{APIVersion: apiVersion, Kind: kind, Namespace: namespace, Name: name})
 	}

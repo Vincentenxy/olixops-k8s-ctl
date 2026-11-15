@@ -93,7 +93,7 @@ flowchart TB
 | 模块 | 已实现 | 必须保留的边界 |
 | --- | --- | --- |
 | 双入口 | 全能力配置下 57 个 MCP 业务工具都有 HTTP 对应；认证管理、能力查询和文件流另有 HTTP 接口 | 工具名不是 URL，映射见覆盖矩阵；关闭 HTTP 后 MCP 文件流仍需可访问 |
-| 集群与资源 | 状态、Namespace、StorageClass、资源列表/详情/原始 YAML、事件、Gateway 摘要 | 固定资源白名单与 Namespace 范围；不返回 kubeconfig，不开放任意 CRD |
+| 集群与资源 | 状态、Namespace、StorageClass、资源列表/详情/原始 YAML、事件、Gateway 摘要 | 固定资源白名单与 Namespace 目标一致性；不返回 kubeconfig，不开放任意 CRD |
 | Namespace | 创建、删除、labels/annotations 增改及显式删除键 | metadata 专用操作不允许改其他字段；受保护 Namespace 不可删除 |
 | Manifest / 工作负载 | validate、server dry-run、apply、scale（含 0）、restart、rollout/history、rollback、删除 | 创建和一般更新走 YAML；UID 前置校验防止误删替代对象；成功不等于就绪 |
 | Helm | list/status/history、upgrade/install、rollback、uninstall | 固定 argv；执行前渲染和检查；禁用 hooks；没有事务回滚保证 |
@@ -294,4 +294,4 @@ HTTP/MCP 的身份、请求 ID、取消和超时沿 context 贯穿。日志统�
 | 上层多集群 | [路由设计](multi-cluster-routing-design.md)、[双入口实施基线](http-mcp-unified-entry-plan.md) |
 | 环境部署与 RBAC | [容器部署](container-deployment.md)、[RBAC 指南](kubernetes-rbac.md) |
 
-接手双方还需线下确认：当前实际运行的 Git/镜像版本、配置来源、clusterId/Namespace 范围、密钥和数据库管理人、PVC/备份位置、Higress 地址/证书/已开放端口、内部执行组件版本、上层集群目录项目及负责人。上述信息不要由文档里的历史 PoC 地址推断；真实 token、私钥、kubeconfig 不进入交接文档。
+接手双方还需线下确认：当前实际运行的 Git/镜像版本、配置来源、clusterId/平台服务权限与 RBAC 范围、密钥和数据库管理人、PVC/备份位置、Higress 地址/证书/已开放端口、内部执行组件版本、上层集群目录项目及负责人。上述信息不要由文档里的历史 PoC 地址推断；真实 token、私钥、kubeconfig 不进入交接文档。

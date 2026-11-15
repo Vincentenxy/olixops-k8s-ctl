@@ -68,7 +68,7 @@ func TestAuthenticatedExecIntegration(t *testing.T) {
 	kube, err := clusterk8s.New(f.cfg.Kubernetes, provider)
 	require.NoError(t, err)
 	policy := &execPolicy{}
-	service := application.NewClusterService(kube, nil, f.cfg.Kubernetes, application.WithPodExecutor(backend, []string{"demo"}), application.WithAuthorizer(policy))
+	service := application.NewClusterService(kube, nil, f.cfg.Kubernetes, application.WithPodExecutor(backend), application.WithAuthorizer(policy))
 	engine, err := router.NewWithAuth(f.cfg, service, nil, f.service)
 	require.NoError(t, err)
 	body := `{"namespace":"demo","pod":"redis-0","container":"redis","action":"redis_ping"}`
@@ -90,12 +90,8 @@ func TestAuthenticatedExecIntegration(t *testing.T) {
 	require.Contains(t, w.Body.String(), "PONG")
 	require.Contains(t, w.Body.String(), "uid-123")
 	require.Equal(t, "wx-user", policy.user)
-	for _, bad := range []string{strings.Replace(body, "redis_ping", "sh -c id", 1), strings.Replace(body, "demo", "default", 1), strings.Replace(body, "redis_ping", "unknown", 1), strings.TrimSuffix(body, "}") + `,"command":["sh","-c","id"]}`, strings.TrimSuffix(body, "}") + `,"timeoutSeconds":31}`} {
-		expected := 400
-		if strings.Contains(bad, `"namespace":"default"`) {
-			expected = 403
-		}
-		require.Equal(t, expected, request(token, bad).Code)
+	for _, bad := range []string{strings.Replace(body, "redis_ping", "sh -c id", 1), strings.Replace(body, "demo", "invalid/namespace", 1), strings.Replace(body, "redis_ping", "unknown", 1), strings.TrimSuffix(body, "}") + `,"command":["sh","-c","id"]}`, strings.TrimSuffix(body, "}") + `,"timeoutSeconds":31}`} {
+		require.Equal(t, 400, request(token, bad).Code)
 	}
 	require.Equal(t, int32(1), calls.Load())
 
@@ -184,7 +180,7 @@ func TestExecBudgetIncludesPodInspection(t *testing.T) {
 	kube, err := clusterk8s.New(cfg, provider)
 	require.NoError(t, err)
 	backend := &countingExecutor{}
-	service := application.NewClusterService(kube, nil, cfg, application.WithPodExecutor(backend, []string{"demo"}))
+	service := application.NewClusterService(kube, nil, cfg, application.WithPodExecutor(backend))
 	ctx := authdomain.WithPrincipal(context.Background(), authdomain.Principal{UserID: "user"})
 	start := time.Now()
 	out, err := service.ExecPodCommand(ctx, domain.PodExecInput{Namespace: "demo", Pod: "redis-0", Container: "redis", Action: "redis_ping", TimeoutSeconds: 1})

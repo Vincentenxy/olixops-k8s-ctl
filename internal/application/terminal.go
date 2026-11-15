@@ -22,8 +22,8 @@ func (s *ClusterService) terminalOwner(ctx context.Context) (string, error) {
 	return p.UserID, nil
 }
 func (s *ClusterService) shellTarget(ctx context.Context, t domain.TerminalTarget, action string) (sessions.Target, error) {
-	if !s.execNamespaces[t.Namespace] || t.Container == "" {
-		return sessions.Target{}, fault.Forbidden("shell target not allowed")
+	if t.Container == "" {
+		return sessions.Target{}, fault.Invalid("explicit container required")
 	}
 	target, err := s.namedTarget(t.Namespace, "Pod", t.Pod)
 	if err != nil {

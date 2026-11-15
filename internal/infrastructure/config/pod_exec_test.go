@@ -6,6 +6,17 @@ import (
 	"testing"
 )
 
+func TestExecAuthorizationDefaultsAndDiagnosticCompatibility(t *testing.T) {
+	cfg := &Config{}
+	require.True(t, cfg.PodExec.AuthorizeTargets())
+	off := false
+	cfg.PodExec.AuthorizationEnabled = &off
+	require.False(t, cfg.PodExec.AuthorizeTargets())
+	require.NoError(t, cfg.ValidatePodExec())
+	cfg.MCP.DiagnosticsOnly = true
+	require.ErrorContains(t, cfg.ValidatePodExec(), "authorization enabled")
+}
+
 func TestExecConfigurationGates(t *testing.T) {
 	good := func() *Config {
 		off := false
@@ -14,13 +25,21 @@ func TestExecConfigurationGates(t *testing.T) {
 	c := good()
 	c.Auth.Enabled = true
 	require.NoError(t, c.ValidatePodExec())
-	for _, change := range []func(*Config){func(c *Config) { c.Kubernetes.InCluster = false }, func(c *Config) { c.Kubernetes.AllowedNamespaces = []string{"other"} }, func(c *Config) { c.Auth.Enabled = false }, func(c *Config) { c.MCP.Enabled = false }, func(c *Config) { c.MCP.WriteEnabled = false }, func(c *Config) { c.Kubernetes.WriteEnabled = false }, func(c *Config) { c.PodExec.AllowedNamespaces = nil }, func(c *Config) { c.PodExec.AllowedNamespaces = []string{"kube-system"} }, func(c *Config) { c.PodExec.AllowedNamespaces = []string{"default"} }} {
+	for _, change := range []func(*Config){func(c *Config) { c.Kubernetes.InCluster = false }, func(c *Config) { c.Auth.Enabled = false }, func(c *Config) { c.MCP.Enabled = false }, func(c *Config) { c.MCP.WriteEnabled = false }, func(c *Config) { c.Kubernetes.WriteEnabled = false }} {
 		c := good()
 		c.Auth.Enabled = true
 		change(c)
 		require.Error(t, c.ValidatePodExec())
 	}
 	require.NoError(t, (&Config{}).ValidatePodExec())
+}
+
+func TestExecIgnoresLegacyNamespaceConfiguration(t *testing.T) {
+	for _, namespaces := range [][]string{nil, {"default", "kube-system"}, {"legacy-other"}} {
+		c := &Config{PodExec: PodExecConfig{Enabled: true, Mode: "managed", Binary: "fixture", AllowedNamespaces: namespaces}, Kubernetes: KubernetesConfig{WriteEnabled: true, AllowedNamespaces: []string{"different"}}}
+		c.Auth.Enabled = true
+		require.NoError(t, c.ValidatePodExec())
+	}
 }
 
 func TestDiagnosticOnlyRequiresPinnedExplicitGrants(t *testing.T) {

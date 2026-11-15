@@ -544,7 +544,7 @@ func TestOperationGuardsAndReservedAuthorization(t *testing.T) {
 		{"delete_resource", map[string]any{"namespace": "demo", "kind": "ClusterRole", "name": "admin"}},
 		{"delete_resource", map[string]any{"namespace": "demo", "kind": "Pod", "name": "../../private"}},
 		{"delete_namespace", map[string]any{"namespace": "default"}},
-		{"create_namespace", map[string]any{"namespace": "private"}},
+		{"create_namespace", map[string]any{"namespace": "invalid/namespace"}},
 		{"update_namespace_metadata", map[string]any{"namespace": "demo", "labels": map[string]string{"../invalid": "x"}}},
 		{"update_namespace_metadata", map[string]any{"namespace": "demo", "labels": map[string]string{"environment": "test"}, "removeLabels": []string{"environment"}}},
 		{"update_configmap", map[string]any{"namespace": "demo", "name": "web", "data": map[string]string{"../invalid": "x"}}},
@@ -553,7 +553,7 @@ func TestOperationGuardsAndReservedAuthorization(t *testing.T) {
 		{"get_resource", map[string]any{"namespace": "demo", "kind": "Secret", "name": "x"}},
 		{"get_resource_yaml", map[string]any{"namespace": "demo", "kind": "Secret", "name": "x"}},
 		{"get_resource_yaml", map[string]any{"namespace": "demo", "kind": "Namespace", "name": "demo"}},
-		{"list_events", map[string]any{"namespace": "private"}},
+		{"list_events", map[string]any{"namespace": "invalid/namespace"}},
 		{"helm_upgrade", map[string]any{"namespace": "demo", "release": "web", "chart": "/etc/passwd"}},
 		{"helm_upgrade", map[string]any{"namespace": "demo", "release": "web", "chart": "--post-renderer"}},
 		{"helm_upgrade", map[string]any{"namespace": "demo", "release": "web", "chart": "demo/nginx", "version": "--debug"}},
@@ -671,11 +671,11 @@ func TestProtectedNamespacesAndManifestGVK(t *testing.T) {
 		strings.ReplaceAll(demoManifest, "name: web", "name: ../../other"),
 		strings.ReplaceAll(demoManifest, "kind: ConfigMap", "kind: ClusterRole"),
 	} {
-		_, err := application.ValidateManifest(manifest, "demo", nil)
+		_, err := application.ValidateManifest(manifest, "demo")
 		require.Error(t, err)
 	}
 	for _, kind := range []string{"Job", "CronJob"} {
-		_, err := application.ValidateManifest("apiVersion: batch/v1\nkind: "+kind+"\nmetadata:\n  name: demo\n", "demo", nil)
+		_, err := application.ValidateManifest("apiVersion: batch/v1\nkind: "+kind+"\nmetadata:\n  name: demo\n", "demo")
 		require.NoError(t, err)
 	}
 }

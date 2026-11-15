@@ -1,0 +1,42 @@
+﻿case,scenario,serviceId,env,entry,httpStatus,businessCode,isError,verdict,detail,requestId,downstreamCalls
+P01,有权限：读取服务基本信息,2963078505,,/api/v1/service/query/id,200,0,False,PASS,业务 code=0,authz-10121993-ccf4707ff17f4c,0
+P02,无权限：读取服务基本信息,3899597151,,/api/v1/service/query/id,500,403,False,FAIL,已拒绝；业务 code=403，但 HTTP 500，应返回 403,authz-10121993-917a44c41ed740,0
+P03,有权限：读取运维文档,2963078505,,query-service-operations-document,200,0,False,PASS,code=0；正文仅保存于私有证据,authz-10121993-7771a039492a47,0
+P04,无权限：读取运维文档,3899597151,,query-service-operations-document,200,403,True,PASS,isError=true，code=403；未返回正文,authz-10121993-2c2409f4e00d42,0
+P05,无权限：保存配置；使用不可提交的空草稿和空提交说明,3899597151,sim,save-service-config,200,,True,PASS,权限拒绝先于参数校验；SDK 工具错误正文为未授权；未提交配置,authz-10121993-0f238b18b8f845,0
+P06,有权限：保存入口通过授权后执行参数检查,2963078505,sim,save-service-config,200,,True,PASS,返回提交说明不能为空；仅验证执行顺序，没有实际保存,authz-10121993-40d66619bb3548,0
+P07,dev 开放策略：配置保存入口,3899597151,dev,save-service-config,200,,True,PASS,通过环境策略后被空提交说明阻止；未保存,authz-10121993-e59709f2a42c4a,0
+P08,HTTP：不携带身份,2963078505,sim,/api/v2/service/authorization/capabilities,401,401,False,PASS,HTTP 401，code=401,authz-10121993-8ad89f4a034642,0
+P09,HTTP：无效 PAT,2963078505,sim,/api/v2/service/authorization/capabilities,401,401,False,PASS,HTTP 401，code=401,authz-10121993-cae915158bf244,0
+P10,MCP：不携带身份,2963078505,sim,k8sctl-get-service-logs,401,401,,PASS,初始化被 HTTP 401 拒绝,authz-10121993-88741ec97b1046,0
+P11,MCP：无效 PAT,2963078505,sim,k8sctl-get-service-logs,401,401,,PASS,初始化被 HTTP 401 拒绝,authz-10121993-ecceef37cf664f,0
+P12,PAT 不变，伪造用户/员工号 Header,3899597151,,query-service-operations-document,200,403,True,PASS,仍然拒绝原本无权读取的文档，code=403,authz-10121993-b5b21ea4e6d64b,0
+P13,MCP 添加 namespace/clusterId/userId 参数,2963078505,sim,k8sctl-get-service-logs,200,0,False,PASS,参数被忽略；仍访问平台解析出的 setting-efficient / gdl-dev-lucy；未越界,authz-10121993-cc31ca6dc3c346,6
+P14,把另一服务实际 Pod 传给日志工具,2963078505,sim,k8sctl-get-service-logs,200,-1,True,PASS,forbidden；下游只有候选清单查询，没有日志调用,authz-10121993-64424e07e06743,2
+P15,把另一服务实际 Pod 传给 Shell 工具,2963078505,sim,k8sctl-exec-service-command,200,-1,True,PASS,forbidden；下游没有 exec 调用,authz-10121993-c5c1b9c92dd248,2
+P16,传入不属于目标 Pod 的容器名,2963078505,sim,k8sctl-get-service-logs,200,-1,True,PASS,invalid_argument；下游没有日志或 exec 调用,authz-10121993-785702dd6a7249,2
+P17,有权限：读取服务日志,2963078505,sim,k8sctl-get-service-logs,200,0,False,PASS,code=0，调用到操作器日志 HTTP 接口,authz-10121993-6f44861bd8aa4f,6
+P18,有权限：执行固定 printf,2963078505,sim,k8sctl-exec-service-command,200,0,False,PASS,outcome=completed，输出 PERMISSION_PROBE_ALLOW，未超时、无上游错误,authz-10121993-a333ecd4949443,7
+P19,有权限：打开终端,2963078505,sim,k8sctl-open-service-terminal,200,0,False,PASS,返回本人 sessionId,authz-10121993-fac4ba8e210447,7
+P20,有权限：向本人终端输入固定 printf,2963078505,sim,k8sctl-write-service-terminal,200,0,False,PASS,code=0,authz-10121993-2aade7bfd3d348,6
+P21,有权限：读取本人终端,2963078505,sim,k8sctl-read-service-terminal,200,0,False,PASS,base64 解码后包含 PERMISSION_TERMINAL_OK,authz-10121993-6883e95e3da44d,6
+P22,有权限：关闭本人终端,2963078505,sim,k8sctl-close-service-terminal,200,0,False,PASS,state=closed；remoteExitConfirmed=false，不能声称远端退出已确认,authz-10121993-c5f9e827197346,2
+P23,有权限：准备上传临时文件,2963078505,sim,k8sctl-prepare-service-file-upload,200,0,False,PASS,返回本人上传引用,authz-10121993-66a6741456c840,7
+P24,有效上传引用：无身份访问,2963078505,sim,/api/v1/k8s-ctl/files/6c3a96a2-817e-4ea7-9830-399645e0128c/upload,401,401,False,PASS,HTTP 401；同一引用随后由本人成功使用,authz-10121993-bbc59575d44747,0
+P25,上传 URL：无效 PAT,2963078505,sim,/api/v1/k8s-ctl/files/b71d6f66-dbcb-4ba1-9fe2-da03e443ca0a/upload,401,401,False,PASS,HTTP 401，认证失败先于引用查找,authz-10121993-e490f5def5d142,0
+P26,有权限：HTTP 上传临时文件,2963078505,sim,/api/v1/k8s-ctl/files/6c3a96a2-817e-4ea7-9830-399645e0128c/upload,200,0,False,PASS,HTTP 200，code=0；实际写入 25 字节测试内容,authz-10121993-698adccae0ba42,6
+P27,已成功使用的上传引用再次使用,2963078505,sim,/api/v1/k8s-ctl/files/6c3a96a2-817e-4ea7-9830-399645e0128c/upload,404,404,False,PASS,HTTP 404，引用不再可用,authz-10121993-87447868ea8049,0
+P28,有权限：准备下载本人测试文件,2963078505,sim,k8sctl-prepare-service-file-download,200,0,False,PASS,返回本人下载引用,authz-10121993-a27ef1a78abb46,7
+P29,有效下载引用：无身份访问,2963078505,sim,/api/v1/k8s-ctl/files/68204730-59c3-4ec8-9967-c5fa9e657984/download,401,401,False,PASS,HTTP 401；同一引用随后由本人成功使用,authz-10121993-ae9310d6afee4e,0
+P30,下载 URL：无效 PAT,2963078505,sim,/api/v1/k8s-ctl/files/221053be-e61e-4313-8a4c-9bb633ad677b/download,401,401,False,PASS,HTTP 401，认证失败先于引用查找,authz-10121993-e219c0dea08842,0
+P31,有权限：HTTP 下载测试文件并核对 SHA-256,2963078505,sim,/api/v1/k8s-ctl/files/68204730-59c3-4ec8-9967-c5fa9e657984/download,200,,False,PASS,字节数、SHA-256 与上传内容一致,authz-10121993-e3500fe6c2b445,6
+P32,已成功使用的下载引用再次使用,2963078505,sim,/api/v1/k8s-ctl/files/68204730-59c3-4ec8-9967-c5fa9e657984/download,404,404,False,PASS,HTTP 404，引用不再可用,authz-10121993-3a536dd18ad646,0
+P33,清理本人创建的临时文件并确认不存在,2963078505,sim,k8sctl-exec-service-command,200,0,False,PASS,outcome=completed；输出 PERMISSION_FIXTURE_REMOVED,authz-10121993-239dc86651f047,7
+P34,MCP 生产环境全局开关,3899597151,prod,k8sctl-get-service-logs,200,-1,True,PASS,forbidden：生产环境禁止使用 MCP；此项不作为用户 Grant 拒绝证据,authz-10121993-005ad01e61d240,0
+P35,HTTP 日志入口：生产环境无 LOGS_READ 权限,,,/api/v2/service/status/log/stream?serviceId=3899597151&curEnv=prod&podName=permission-probe-not-a-real-pod&container=gxj-adm-api&tailLines=1,500,403,False,FAIL,权限拒绝生效且未读日志；业务 code=403，但 HTTP 500,authz-10121993-ccf5d16bbb8749,0
+P36,对不可用终端目标调用 Shell,3899597151,sim,k8sctl-exec-service-command,200,-1,True,BLOCKED,先返回 backend_not_configured；无法据此验证 TERMINAL Grant 拒绝,authz-10121993-e3ea0118bb934d,0
+P37,对不可用终端目标打开终端,3899597151,sim,k8sctl-open-service-terminal,200,-1,True,BLOCKED,LQY 终端不支持，且目标未接控制器；先返回 backend_not_configured,authz-10121993-37fa54af3b264a,0
+P38,对不可用目标准备上传,3899597151,sim,k8sctl-prepare-service-file-upload,200,-1,True,BLOCKED,先返回 backend_not_configured；没有获得引用,authz-10121993-4e1cbf62682644,0
+P39,对不可用目标准备下载,3899597151,sim,k8sctl-prepare-service-file-download,200,-1,True,BLOCKED,先返回 backend_not_configured；没有获得引用,authz-10121993-322514a05e5743,0
+P40,dev/test 能力声明与共享操作实际判权一致性,3899597151,dev,/api/v2/service/authorization/capabilities,200,0,False,FAIL,两环境均声明 DOCUMENT_READ、SERVICE_READ=true；实际同服务共享文档/基本信息被拒绝,authz-10121993-7df829348ed647,0
+P41,publish 重载后旧终端引用,2963078505,sim,k8sctl-read-service-terminal,200,-1,True,PASS,not_found；旧引用不能恢复；没有更换身份或绕过鉴权,authz-10121993-cec8dfd2cf674f,0

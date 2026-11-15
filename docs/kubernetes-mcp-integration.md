@@ -58,7 +58,6 @@ sidecar 与主容器共享 Pod 网络及 ServiceAccount，是同一信任边界�
 kubernetes:
   in-cluster: true
   write-enabled: true
-  allowed-namespaces: [wx-test-ns-001, higress-system]
 auth:
   enabled: true
   # company / pat 配置按认证说明填写；凭据仅挂载 Secret，不写入 YAML。
@@ -68,10 +67,9 @@ mcp:
 pod-exec:
   enabled: true
   endpoint: http://127.0.0.1:8082/mcp
-  allowed-namespaces: [wx-test-ns-001]
 ```
 
-以上是局部配置示例，保留现有其他字段。日志入口沿用原访问策略；exec 要求 JWT/PAT、Kubernetes 写开关、明确业务 Namespace，以及 HTTP 或允许写工具的 MCP 入口；不再强制要求主 MCP 开启。旧 diagnostics-only 模式保持原限制。exec Namespace 在主 allowlist 非空时必须是其子集，否则启动失败；运行时仍执行 kubernetes.allowed-namespaces 检查；default、olixops、kube-* 禁止 exec。
+以上是局部配置示例，保留现有其他字段。日志入口沿用原访问策略；exec 要求 JWT/PAT、Kubernetes 写开关、有效目标 Namespace，以及 HTTP 或允许写工具的 MCP 入口；不再强制要求主 MCP 开启。旧 diagnostics-only 模式保持原限制。不再配置或检查静态 Namespace 名单，也不按 Namespace 名称禁止 exec；平台依据服务权限解析并授权目标，独立入口保留 Authorizer 与 Kubernetes RBAC。
 
 准备目标 Pod 的声明或工作负载 spec.template.metadata.labels：
 
@@ -97,7 +95,7 @@ kubectl kustomize deployments
 
 ## 权限与验收边界
 
-调用已有 Authorizer 的 pod.exec（Write=true）扩展点，可信用户身份来自认证上下文。当前默认 Authorizer 仍放行，尚未实现个人 Namespace/Pod 归属、角色审批或逐用户 Kubernetes 身份。配置、标签与 RBAC 是当前作用范围限制，不能宣称已经有完整多人隔离。记录用户 ID、PAT ID、目标、固定动作、结果与成功标记，不记录令牌、完整输出或任意命令参数；完整持久化审计未实现。
+调用已有 Authorizer 的 pod.exec（Write=true）扩展点，可信用户身份来自认证上下文。当前默认 Authorizer 仍放行，尚未实现个人 Namespace/Pod 归属、角色审批或逐用户 Kubernetes 身份。功能开关、Pod 标签与 RBAC 是当前执行边界，不能宣称已经有完整多人隔离。记录用户 ID、PAT ID、目标、固定动作、结果与成功标记，不记录令牌、完整输出或任意命令参数；完整持久化审计未实现。
 
 自动测试使用本地模拟 Kubernetes API 和真实 SDK 协议服务，覆盖 JWT REST、PAT MCP、授权扩展点、固定动作、参数拒绝、Namespace 和 Pod 检查、上游错误、输出限制、连接错误与超时。它们验证桥接逻辑，不代替上游镜像和集群联调。
 

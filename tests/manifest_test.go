@@ -13,7 +13,7 @@ func TestValidateManifest(t *testing.T) {
 kind: ConfigMap
 metadata:
   name: example
-`, "default", nil)
+`, "default")
 	require.NoError(t, err)
 	require.Len(t, resources, 1)
 	require.Equal(t, "default", resources[0].Namespace)
@@ -22,7 +22,7 @@ metadata:
 kind: Secret
 metadata:
   name: forbidden
-`, "default", nil)
+`, "default")
 	require.ErrorContains(t, err, "Secret manifests are not accepted")
 }
 
@@ -32,6 +32,6 @@ kind: Service
 metadata:
   name: example
   namespace: other
-`, "default", map[string]struct{}{"default": {}})
+`, "default")
 	require.ErrorContains(t, err, `expected "default"`)
 }

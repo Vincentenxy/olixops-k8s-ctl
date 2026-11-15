@@ -56,6 +56,58 @@ Dockerfile 默认使用 Docker Hub 的 `golang:1.26-alpine` 构建、`alpine:3.2
 
 镜像只复制 Go 源码、依赖清单和容器专用配置，不复制开发用的 `configs/config.yaml`。真实 kubeconfig、API key、SQLite 文件不应放入构建内容；依赖下载认证也不要使用 Docker ARG 传递。
 
+## 构建内容与缓存
+
+`.dockerignore` 使用白名单，默认排除所有内容，仅允许以下文件进入 Docker 构建上下文：
+
+- `go.mod`、`go.sum`、Docker 构建定义
+- `cmd/main.go`、`cmd/pat/*.go`
+- `internal/**/*.go`、`pkg/**/*.go`，排除 `*_test.go`
+- `configs/config.container.yaml`，作为运行时默认配置
+
+Agent 生成的文档、报告、Skills、截图、PPT/PDF、README、AGENTS、测试记录、部署清单、测试源码、其他入口以及本地数据不会发送到构建器。开发配置、`.env`、kubeconfig 和本地 Secret 也不在白名单中。以后增加嵌入资源或新的构建入口时，应同时更新白名单及 Dockerfile，避免遗漏编译依赖。
+
+Go 源码仅在 build 阶段编译；最终镜像不携带源码、Go 编译器或文档，只保留服务/PAT 二进制、kubectl、Helm、CA 证书和容器默认配置。生产打包不运行测试，测试在独立流程执行。
+
+缓存按以下方式组织：
+
+1. 先复制 `go.mod`、`go.sum` 并下载模块。仅修改业务源码不会使这一步失效。
+2. 使用 BuildKit 的 `/go/pkg/mod` 和 `/root/.cache/go-build` 缓存，复用原有缓存路径；模块未变化时避免重复下载，源码变化时复用未变化包的编译结果。
+3. 一次 `go build` 构建服务与 PAT，避免重复启动独立的编译流程。
+4. 独立 `runtime-base` 阶段安装运行依赖，与源码编译无关，BuildKit 可并行准备；源码修改不会重新安装工具。
+5. 文档和测试文件不进入上下文，它们的变更不会使生产源码复制/编译层失效。
+
+日常只构建实际节点所需的一个架构，且复用同一个 buildx builder。不要常规使用 `--no-cache`、`--pull` 或清理 builder 缓存。第一次构建仍需下载依赖并编译 Kubernetes/SQLite 等包；代理、机器性能和缓存状态会影响实际耗时，不承诺固定秒数。
+
+本地构建并加载镜像：
+
+```bash
+docker buildx build --platform linux/amd64 \
+  --build-arg GOPROXY=https://goproxy.cn,direct \
+  -t k8s-ctl:dev --load .
+```
+
+在原生 ARM 节点使用 `--platform linux/arm64`。CI 使用临时 builder 时，可以额外配置远程层缓存：
+
+```bash
+docker buildx build --platform linux/amd64 \
+  --cache-from type=registry,ref=registry.example.com/olixops/k8s-ctl:buildcache \
+  --cache-to type=registry,ref=registry.example.com/olixops/k8s-ctl:buildcache,mode=max \
+  -t registry.example.com/olixops/k8s-ctl:dev --push .
+```
+
+替换为实际仓库，使用支持 registry cache exporter 的 buildx builder（如 docker-container driver）。远程层缓存和可执行步骤里的 cache mount 是两种缓存；导出层缓存不会自动导出 cache mount 的内容。需要跨流水线持续保留 Go 编译缓存时，优先复用持久化 builder。
+
+### 构建验证（2026-11-15）
+
+本次使用 Docker 实际导出上下文核对：87 个必要文件、410792 字节，生产 Go 源码无遗漏，没有多余文档、测试、本地配置或其他入口。Linux amd64 两个二进制构建通过，Go 编译步骤耗时约 51.5 秒。
+
+Docker Hub 获取 Alpine 3.22 元数据时连接被拒绝，改用 `--build-arg RUNTIME_IMAGE=m.daocloud.io/docker.io/library/alpine:3.22` 后，完整镜像成功构建为本地 `k8s-ctl:docker-audit`。未推送远程。
+
+运行检查通过：UID/GID 10001、`/data` 可写、两个二进制与默认配置存在；`/app` 只有这三个文件，没有源码/文档；kubectl 客户端与 Helm 3 可执行。未连接真实 Kubernetes 集群。
+
+同一 builder、相同参数和相同内容重复完整构建，13 个步骤命中缓存，本机耗时 1.23 秒。该数字仅为本次热缓存验证，不能代表首次构建或源码改动后的耗时。`go test ./...`、`go vet ./...` 通过；Dockerfile 和 ignore 文件的 diff 空白检查通过。
+
 ## 部署前准备
 
 `deployments/catalog.yaml` 包含 Namespace、ServiceAccount、ConfigMap、PVC、单副本 Deployment、ClusterIP Service 和 Higress Ingress。部署前核对：

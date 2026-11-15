@@ -80,15 +80,25 @@ type ShellConfig struct {
 }
 
 type PodExecConfig struct {
-	Mode              string                   `mapstructure:"mode"`
-	Binary            string                   `mapstructure:"binary"`
-	Grants            []domain.DiagnosticGrant `mapstructure:"grants"`
-	Enabled           bool                     `mapstructure:"enabled"`
-	Endpoint          string                   `mapstructure:"endpoint"`
-	AllowedNamespaces []string                 `mapstructure:"allowed-namespaces"`
+	// Nil preserves target authorization for existing programmatic configurations.
+	AuthorizationEnabled *bool                    `mapstructure:"authorization-enabled"`
+	Mode                 string                   `mapstructure:"mode"`
+	Binary               string                   `mapstructure:"binary"`
+	Grants               []domain.DiagnosticGrant `mapstructure:"grants"`
+	Enabled              bool                     `mapstructure:"enabled"`
+	Endpoint             string                   `mapstructure:"endpoint"`
+	// Deprecated: Namespace permissions belong to platform service authorization; ignored.
+	AllowedNamespaces []string `mapstructure:"allowed-namespaces"`
+}
+
+func (c PodExecConfig) AuthorizeTargets() bool {
+	return c.AuthorizationEnabled == nil || *c.AuthorizationEnabled
 }
 
 func (c *Config) ValidatePodExec() error {
+	if c.MCP.DiagnosticsOnly && !c.PodExec.AuthorizeTargets() {
+		return fmt.Errorf("diagnostics-only requires pod-exec authorization enabled")
+	}
 	if c.Shell.Enabled && (!c.PodExec.Enabled || c.MCP.DiagnosticsOnly) {
 		return fmt.Errorf("shell requires pod-exec enabled and diagnostics-only=false")
 	}
@@ -138,26 +148,6 @@ func (c *Config) ValidatePodExec() error {
 	if c.PodExec.Mode != "managed" && !c.Kubernetes.InCluster {
 		return fmt.Errorf("pod-exec sidecar requires kubernetes.in-cluster to keep checks and execution on the same cluster")
 	}
-	if len(c.PodExec.AllowedNamespaces) == 0 {
-		return fmt.Errorf("pod-exec requires explicit allowed-namespaces")
-	}
-	for _, ns := range c.PodExec.AllowedNamespaces {
-		if len(validation.IsDNS1123Label(ns)) > 0 || ns == "default" || ns == "olixops" || strings.HasPrefix(ns, "kube-") {
-			return fmt.Errorf("pod-exec namespace is not a business namespace")
-		}
-		if len(c.Kubernetes.AllowedNamespaces) > 0 {
-			allowed := false
-			for _, mainNS := range c.Kubernetes.AllowedNamespaces {
-				if ns == mainNS {
-					allowed = true
-					break
-				}
-			}
-			if !allowed {
-				return fmt.Errorf("pod-exec namespace must be included in kubernetes.allowed-namespaces")
-			}
-		}
-	}
 	return nil
 }
 
@@ -180,13 +170,14 @@ type AppConfig struct {
 }
 
 type KubernetesConfig struct {
-	InCluster            bool             `mapstructure:"in-cluster"`
-	Kubeconfig           KubeconfigConfig `mapstructure:"kubeconfig"`
-	WriteEnabled         bool             `mapstructure:"write-enabled"`
-	AllowedNamespaces    []string         `mapstructure:"allowed-namespaces"`
-	CommandTimeoutSecond int              `mapstructure:"command-timeout-seconds"`
-	Kubectl              string           `mapstructure:"kubectl"`
-	Helm                 string           `mapstructure:"helm"`
+	InCluster    bool             `mapstructure:"in-cluster"`
+	Kubeconfig   KubeconfigConfig `mapstructure:"kubeconfig"`
+	WriteEnabled bool             `mapstructure:"write-enabled"`
+	// Deprecated: Namespace permissions belong to platform service authorization; ignored.
+	AllowedNamespaces    []string `mapstructure:"allowed-namespaces"`
+	CommandTimeoutSecond int      `mapstructure:"command-timeout-seconds"`
+	Kubectl              string   `mapstructure:"kubectl"`
+	Helm                 string   `mapstructure:"helm"`
 }
 
 type KubeconfigConfig struct {
@@ -220,12 +211,12 @@ func Load(path string) (*Config, error) {
 	v.SetDefault("shell.interceptor.enabled", true)
 	v.SetDefault("shell.interceptor.provider", "allow-all")
 	v.SetDefault("pod-exec.enabled", false)
+	v.SetDefault("pod-exec.authorization-enabled", true)
 	v.SetDefault("pod-exec.mode", "sidecar")
 	v.SetDefault("pod-exec.binary", "kubernetes-mcp-server")
 	v.SetDefault("pod-exec.grants", []domain.DiagnosticGrant{})
 	v.SetDefault("mcp.diagnostics-only", false)
 	v.SetDefault("pod-exec.endpoint", "http://127.0.0.1:8082/mcp")
-	v.SetDefault("pod-exec.allowed-namespaces", []string{})
 	for key, value := range map[string]any{
 		"auth.enabled": false, "auth.company.enabled": false, "auth.company.issuer": "", "auth.company.audience": "", "auth.company.key-id": "", "auth.company.public-key": "", "auth.company.public-key-file": "",
 		"auth.pat.enabled": false, "auth.pat.issuer": "k8s-ctl", "auth.pat.audience": "k8s-ctl", "auth.pat.key-id": "pat-v1", "auth.pat.private-key-file": "", "auth.pat.public-key-file": "", "auth.pat.database-path": "./data/auth.db",

@@ -395,7 +395,7 @@ func (s *ClusterService) GetHelmHistory(ctx context.Context, namespace, release 
 }
 func (s *ClusterService) helmValidator(ctx context.Context, action string, releaseTarget domain.Target) func(string) error {
 	return func(manifest string) error {
-		resources, err := ValidateManifest(manifest, releaseTarget.Namespace, s.allowedNS)
+		resources, err := ValidateManifest(manifest, releaseTarget.Namespace)
 		if err != nil {
 			return err
 		}

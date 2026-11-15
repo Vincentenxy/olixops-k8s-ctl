@@ -1,0 +1,55 @@
+# Namespace create is cluster-scoped; application allowlist must stay explicit.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: olixops-k8s-ctl-platform-namespace-creator
+rules:
+- apiGroups:
+  - ''
+  resources:
+  - namespaces
+  verbs:
+  - create
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: olixops-k8s-ctl-platform-namespace-creator
+subjects:
+- kind: ServiceAccount
+  name: olixops-k8s-ctl-platform
+  namespace: olixops-platform
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: olixops-k8s-ctl-platform-namespace-creator
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: olixops-k8s-ctl-platform-namespace-metadata
+rules:
+- apiGroups:
+  - ''
+  resources:
+  - namespaces
+  resourceNames:
+  - developer-demo
+  verbs:
+  - get
+  - update
+  - patch
+  - delete
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: olixops-k8s-ctl-platform-namespace-metadata
+subjects:
+- kind: ServiceAccount
+  name: olixops-k8s-ctl-platform
+  namespace: olixops-platform
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: olixops-k8s-ctl-platform-namespace-metadata
