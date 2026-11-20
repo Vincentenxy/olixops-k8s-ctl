@@ -385,7 +385,7 @@ docker buildx build \
   --platform linux/amd64 \
   --build-arg BASE_IMAGE_REGISTRY=m.daocloud.io/docker.io \
   --build-arg GOPROXY=https://goproxy.cn,direct \
-  -t harbor.gtjaqh.net/lucy-dev/k8s-ctl:0.0.1-alpha.2 \
+  -t harbor.gtjaqh.net/lucy-dev/k8s-ctl:0.0.1-alpha.3 \
   --push \
   .
 ```

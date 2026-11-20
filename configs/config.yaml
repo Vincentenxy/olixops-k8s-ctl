@@ -1,8 +1,3 @@
-# k8s-ctl 唯一运行配置
-# app.mode 可选 operator 或 standalone，启动入口和 Docker 镜像保持不变
-# Viper 环境变量优先于 YAML，点和短横线转换为下划线，例如 AUTH_JWT_PUBLIC_KEY
-# 凭据通过环境变量、挂载文件或 Kubernetes Secret 注入，不写入此文件
-
 app:
   mode: operator
   name: k8s-ctl
@@ -12,7 +7,6 @@ operator:
   max-clusters: 16
 
 server:
-  host: 127.0.0.1
   port: 8901
   public-url: ""
   mode: debug
@@ -27,7 +21,6 @@ auth:
   enabled: true
   jwt:
     enabled: true
-    # 公司统一 JWT 的 RSA 公钥、issuer、audience 和 key-id
     public-key: MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAj4uJ5IOD52X+qQwKa/rfctviCqrKTQWFsEKUDo9EDAH5KUziS/1O5qWe3zhtfCBGAEcCnELW3bpQHaSgghazVVXesdnGqIDQZSbMuemt7UXLsp72qDppR/x94o67srTo9Z3Wz0MsrR3/dxArFZuYGW7v8z8BK1UFLLSgA+LJu0YEcrhgVMiMtugOcjZ5NbRGXpo4fFbnIMtslr6xhOpA7zB8ycUjomHZlbakbYQU7tnHuj3Oyoe9BNUEueSVyPTiK3rwUaOl1EAJ8oBd380xVi01yLRriIIQPmCY2r9/RZJ8mUFFn6DlsF3rg5aPuVGHkCJIXAYrOdiruNcEcOn8FwIDAQAB
     issuer: https://eiam.qiuer.net/auth/oidc/62F295C3C382499EA2124E6C8B080B8E
     audience: ZmEyMjBjNWFhNmI2NDhlOWE4NzYwNjkyNjQ5ZWQ4NTg
@@ -54,21 +47,10 @@ kubernetes:
     reference: ""
     context: ""
 
-
-
-# 当前 operator 只提供资源和日志能力，因此不配置 pod-exec/shell。
-# 需要 Shell、终端或文件传输时，再按 configs/config.example.yaml 的可选块显式开启。
-mcp:
-  enabled: false
-  write-enabled: false
-  diagnostics-only: false
-
-
 pod-exec:
   authorization-enabled: false
   enabled: true
   mode: managed
-  # 必须是本机/镜像内存在且版本为 v0.1.2 的 kubernetes-mcp-server
   binary: kubernetes-mcp-server
 
 shell:
