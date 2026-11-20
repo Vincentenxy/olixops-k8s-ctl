@@ -29,7 +29,7 @@ spec:
         imagePullPolicy: IfNotPresent
         ports:
         - name: http
-          containerPort: 8091
+          containerPort: 8901
         resources:
           requests:
             cpu: 100m
@@ -56,6 +56,12 @@ spec:
             port: http
           periodSeconds: 10
           timeoutSeconds: 2
+        env:
+        - name: AUTH_JWT_PUBLIC_KEY
+          valueFrom:
+            secretKeyRef:
+              name: olixops-k8s-ctl-platform-auth
+              key: platform-public.pem
         volumeMounts:
         - name: config
           mountPath: /app/configs

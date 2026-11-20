@@ -4,7 +4,7 @@ app:
   version: 0.2.0
 server:
   host: 0.0.0.0
-  port: 8091
+  port: 8901
   mode: release
   public-url: "" # Relative transfer paths; the upper platform owns its public URL.
 http:
@@ -17,14 +17,15 @@ cluster:
   id: poc
 auth:
   enabled: true
-  company:
+  jwt:
     enabled: true
-    issuer: publish-devops-api
-    audience: k8s-ctl:poc
-    key-id: platform-v1
-    public-key-file: /var/run/k8s-ctl-auth/platform-public.pem
+    # Set AUTH_JWT_PUBLIC_KEY to the platform PEM or Base64 DER public key.
+    public-key: ""
+    issuer: ""
+    audience: ""
+    key-id: ""
   pat:
-    enabled: false
+    enabled: false # Enable with the same Redis database used by Setting.
 kubernetes:
   in-cluster: true
   write-enabled: true

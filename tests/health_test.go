@@ -16,7 +16,7 @@ func TestHealthEndpoint(t *testing.T) {
 	logger.Init("test")
 	gin.SetMode(gin.TestMode)
 	r, err := router.New(&config.Config{
-		Server: config.ServerConfig{Mode: "test", Port: 8091},
+		Server: config.ServerConfig{Mode: "test", Port: 8901},
 		App:    config.AppConfig{Name: "olixops-k8s-ctl", Version: "test"},
 	})
 	require.NoError(t, err)

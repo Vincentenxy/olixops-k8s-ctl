@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -200,13 +202,15 @@ func TestMCPConfigEnvironment(t *testing.T) {
 	t.Setenv("K8S_CTL_SHELL_ENABLED", "false")
 	t.Setenv("MCP_WRITE_ENABLED", "true")
 	t.Setenv("MCP_ENABLED", "false")
-	cfg, err := config.Load("../configs")
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "config.yaml"), []byte("server:\n  host: 127.0.0.1\n  port: 8901\n"), 0600))
+	cfg, err := config.Load(dir)
 	require.NoError(t, err)
 	require.False(t, cfg.MCP.Enabled)
 	require.True(t, cfg.MCP.WriteEnabled)
 	t.Setenv("MCP_WRITE_ENABLED", "false")
 	t.Setenv("MCP_ENABLED", "true")
-	cfg, err = config.Load("../configs")
+	cfg, err = config.Load(dir)
 	require.NoError(t, err)
 	require.True(t, cfg.MCP.Enabled)
 	require.False(t, cfg.MCP.WriteEnabled)

@@ -4,7 +4,6 @@ package operator
 import (
 	"context"
 	"crypto/sha256"
-	"crypto/subtle"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -13,6 +12,7 @@ import (
 	"sync"
 
 	"github.com/google/uuid"
+	d "olixops-k8s-ctl/internal/domain/auth"
 	"olixops-k8s-ctl/pkg/logger"
 )
 
@@ -33,14 +33,13 @@ type entry struct {
 type Registry struct {
 	mu      sync.Mutex
 	entries map[string]*entry
-	key     string
 	max     int
 	factory Factory
 	closed  bool
 }
 
-func New(key string, max int, factory Factory) *Registry {
-	return &Registry{entries: map[string]*entry{}, key: key, max: max, factory: factory}
+func New(max int, factory Factory) *Registry {
+	return &Registry{entries: map[string]*entry{}, max: max, factory: factory}
 }
 func result(w http.ResponseWriter, status int, reason string, data any) {
 	w.Header().Set("Content-Type", "application/json")
@@ -63,19 +62,23 @@ func (r *Registry) ServeHTTP(w http.ResponseWriter, q *http.Request) {
 	}
 	w.Header().Set("X-Request-Id", id)
 	q = q.WithContext(context.WithValue(q.Context(), logger.TraceIDKey, id))
-	if q.URL.Path == "/api/v1/pub/health" && q.Method == http.MethodGet {
+	if q.Method == http.MethodGet && (q.URL.Path == "/api/v1/pub/health" || q.URL.Path == "/api/v1/pub/ready") {
 		result(w, 200, "", map[string]any{"operator": true})
 		return
 	}
+	if _, ok := d.FromContext(q.Context()); !ok {
+		result(w, 401, "unauthenticated", nil)
+		return
+	}
+	if q.Method == http.MethodGet && q.URL.Path == "/api/v1/auth/me" {
+		principal, _ := d.FromContext(q.Context())
+		result(w, 200, "", principal)
+		return
+	}
+
 	if q.URL.Path == "/api/v1/operator/clusters/configure" {
 		if q.Method != http.MethodPost {
 			result(w, 405, "method_not_allowed", nil)
-			return
-		}
-		header := q.Header.Get("Authorization")
-		supplied := strings.TrimPrefix(header, "Bearer ")
-		if !strings.HasPrefix(header, "Bearer ") || r.key == "" || subtle.ConstantTimeCompare([]byte(supplied), []byte(r.key)) != 1 {
-			result(w, 401, "unauthenticated", nil)
 			return
 		}
 		r.configure(w, q)

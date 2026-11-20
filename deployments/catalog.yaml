@@ -27,7 +27,7 @@ data:
     # The API key is read from a mounted Secret file at startup.
     server:
       host: 0.0.0.0
-      port: 8091
+      port: 8901
       public-url: https://efficient-lab.qiuer.net/k8sctl
       mode: release
 
@@ -54,21 +54,24 @@ data:
     # Opt in after mounting RSA keys; see docs/authentication.md.
     auth:
       enabled: false
-      company:
+      jwt:
         enabled: false
         issuer: ""
         audience: ""
         key-id: ""
         public-key: ""
-        public-key-file: ""
       pat:
         enabled: false
-        issuer: k8s-ctl
-        audience: k8s-ctl
-        key-id: pat-v1
-        private-key-file: /app/secrets/auth/pat-private.pem
-        public-key-file: /app/secrets/auth/pat-public.pem
-        database-path: /data/auth.db
+        prefix: effpat
+    redis:
+      addr: ""
+      username: ""
+      password: ""
+      db: 0
+      timeout: 3s
+      sentinel:
+        master: ""
+        nodes: []
 
 
     # Kubernetes MCP Server sidecar bridge; requires JWT/PAT and both write switches.
@@ -151,7 +154,7 @@ spec:
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
-              containerPort: 8091
+              containerPort: 8901
           resources:
             requests:
               cpu: 100m
@@ -221,7 +224,7 @@ spec:
     app: olixops-k8s-ctl
   ports:
     - name: http
-      port: 8091
+      port: 8901
       targetPort: http
 ---
 apiVersion: networking.k8s.io/v1

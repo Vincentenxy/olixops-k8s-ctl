@@ -9,9 +9,9 @@
 
 此前的只读方案仅做了清单盘点，没有实际关闭代码功能。当前分支保留全部已支持的资源变更、Helm、目录、端口、Shell、终端和文件接口；无需恢复删除的业务代码。
 
-新增 [完整能力配置](../configs/config.publish-devops.example.yaml)：HTTP、主 MCP 及 MCP 写工具、Kubernetes 写、Pod exec、Shell、Catalog 均开启；不再用示例中逐用户的 grants 做重复授权。保留公司 JWT 验签、Namespace 范围、Pod 执行资格、用户绑定句柄、独立 Shell 拦截点和 Kubernetes RBAC。没有新增平台角色、create-user-id 或管理员策略。
+统一使用 [配置示例](../configs/config.example.yaml)，通过同一个 `config.yaml` 的 `app.mode` 选择 operator 或 standalone；Publish 对接使用 operator。HTTP、Kubernetes 写、Pod exec、Shell 等能力按该文件的开关配置，不再维护模式专用配置文件或 `.local` 覆盖文件。保留公司 JWT 验签、平台 PAT 独立验签、用户绑定句柄、独立 Shell 拦截点和 Kubernetes RBAC。没有新增平台角色、create-user-id 或管理员策略。
 
-该示例需复制为独立目录的 config.yaml，填写可信公钥挂载、实际 issuer/audience、clusterId、Namespace 和网关配置，并保证 `/data` 可写持久化。它没有修改已有本地配置或运行中的部署，不能据此认为线上已经放开。当前示例的默认 issuer 为 publish-devops-api，必须由上下层实际签发约定确认。
+运行时直接填写 `configs/config.yaml`，部署时将同一文件挂载为 `/app/configs/config.yaml`，再填写可信公钥、实际 issuer/audience、clusterId、Namespace 和网关配置，并保证 `/data` 可写持久化。它没有修改运行中的部署，不能据此认为线上已经放开。当前示例的 issuer、audience 和 key-id 必须由上下层实际签发约定确认。
 
 完整能力指当前已实现的能力，不包括任意 CRD、Secret 通用 CRUD、节点操作或 RBAC 管理。主 MCP 可以关闭，上层只调用下层 HTTP；内部执行用 Kubernetes MCP Server sidecar 是独立组件，仍用于单次 exec。
 
@@ -67,9 +67,9 @@ flowchart TB
 
 ### B. 可信用户身份传递
 
-上层验证用户 JWT/PAT、执行授权后，传递下层认可的 Bearer。若现有公司 JWT 的算法、issuer、audience 与下层兼容，可以直接透传；否则由平台签发短期 RS256 内部 JWT，下层通过挂载平台公钥验签。下层支持的用户 claim 优先 staffuserid、回退 sub。短期令牌需要 exp，并按配置约定 issuer/audience/kid；配置了 kid 时必须匹配。
+上层验证用户 JWT/PAT、执行授权后，透传当前调用者的同一个 Bearer。k8s-ctl 使用公司 JWT 公钥或独立的 PAT 公钥进行本地验签，不连接 Setting Redis。Publish 不签发短期内部 JWT，k8s-ctl 不维护独立 PAT 数据库，也不接受 X-User-Id 覆盖身份。下层支持的用户 claim 使用 `staffuserid`，并分别校验两类 Token 的 exp、issuer、audience 和配置的 kid。
 
-必须保留真实 UserID，否则终端和文件引用归属会退化成所有人共用一个账号。上层 PAT 在自己的数据库校验，不复制到每个下层 PAT 数据库。不能仅通过 X-User-Id 或 MCP 的 gxjId 参数宣称用户身份。平台签名能力、用户会话来源和密钥管理在上层正式接入时确认，本次不假设已存在。
+必须保留真实 UserID，否则终端和文件引用归属会退化成所有人共用一个账号。不能仅通过 X-User-Id 或 MCP 的 gxjId 参数宣称用户身份。操作器注册和业务请求使用同一认证链路，Publish 的业务权限与 k8s-ctl 的目标、会话和 Kubernetes RBAC 校验分别执行。
 
 下层公司 JWT 验签支持已实现；动态多公钥轮换、令牌交换服务和平台专用细粒度授权令牌尚未实现。
 
@@ -127,7 +127,7 @@ Catalog 可继续在下层存储模板、实例修订、部署与端口记录，
 
 ## 6. 待双方确认的具体信息
 
-- 上层既有用户认证在 HTTP/MCP 两个入口分别如何提供可信身份；是否具备内部 JWT 签发能力。
+- 上层 HTTP/MCP 入口均从当前请求上下文取得 JWT/PAT，并将同一个 Bearer Token 传递给操作器；不再引入内部 JWT 签发能力。
 - ClusterInfo.id、Helm Wrapper 中 cluster 参数和实际集群的一一对应关系；控制器地址维护位置。
 - 公司 JWT 的算法、issuer/audience/kid、公钥管理和用户 claim；不在文档填写真实 token。
 - 第一批需要开放的动作和业务对象：以服务授权还是允许 Namespace 级通用资源操作。

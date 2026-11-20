@@ -1,4 +1,6 @@
-// Package auth defines trusted identities and personal token persistence ports.
+// Package auth defines verified platform identities. PAT status and revocation
+// are checked by the upstream Publish service; the independent operator only
+// validates the signed credential and its claims.
 package auth
 
 import (
@@ -7,22 +9,16 @@ import (
 	"time"
 )
 
-const PATSource = "personalToken"
-const PATUse = "personalAccessToken"
-const PATType = "k8s-ctl-pat+jwt"
-
 var ErrUnauthenticated = errors.New("authentication failed")
 var ErrForbidden = errors.New("operation not permitted")
-var ErrInvalid = errors.New("invalid token parameters")
-var ErrNotFound = errors.New("token not found")
-var ErrLimit = errors.New("active token limit reached")
 
 type Principal struct {
-	UserID     string `json:"userId"`
-	Name       string `json:"name"`
-	AuthSource string `json:"authSource"`
-	TokenUse   string `json:"tokenUse"`
-	TokenID    string `json:"tokenId,omitempty"`
+	UserID    string    `json:"userId"`
+	StaffNo   string    `json:"staffNo,omitempty"`
+	Name      string    `json:"name"`
+	AuthType  string    `json:"authType"`
+	TokenID   string    `json:"tokenId,omitempty"`
+	ExpiresAt time.Time `json:"expiresAt"`
 }
 type contextKey struct{}
 
@@ -34,25 +30,8 @@ func FromContext(ctx context.Context) (Principal, bool) {
 	return p, ok && p.UserID != ""
 }
 
-type Token struct {
-	ID         string     `json:"id"`
-	OwnerID    string     `json:"ownerId"`
-	Name       string     `json:"name"`
-	Hash       string     `json:"-"`
-	CreatedAt  time.Time  `json:"createdAt"`
-	ExpiresAt  time.Time  `json:"expiresAt"`
-	LastUsedAt *time.Time `json:"lastUsedAt,omitempty"`
-	RevokedAt  *time.Time `json:"revokedAt,omitempty"`
-}
-type Repository interface {
-	Create(context.Context, Token, int) error
-	List(context.Context, string) ([]Token, error)
-	Revoke(context.Context, string, string, time.Time) error
-	Validate(context.Context, string, string, string, time.Time) (bool, error)
-}
 type Verifier interface {
 	Verify(string) (Principal, error)
 }
-type Issuer interface {
-	Issue(Principal, string, time.Time) (string, error)
-}
+
+// PersonalTokenRecord matches Setting/Common's UTF-8 JSON authentication cache.

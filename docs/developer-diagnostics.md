@@ -32,7 +32,7 @@
 
 ## 管理员配置与用户权限
 
-完整起点为 [config.diagnostics.example.yaml](../configs/config.diagnostics.example.yaml)。部署时用它替换主容器 ConfigMap 的 config.yaml，填入真实身份和目标，并准备认证 Secret。示例中的占位值需要替换，不能直接当成可用目标。
+完整起点为 [config.yaml](../configs/config.yaml)。将 `app.mode` 设为 `standalone`、`mcp.diagnostics-only` 设为 `true`，再填入真实身份和目标并准备认证 Secret。示例中的占位值需要替换，不能直接当成可用目标。
 
 ```yaml
 mcp:

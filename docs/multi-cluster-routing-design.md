@@ -38,7 +38,7 @@ flowchart TD
 - [Router](../internal/interfaces/router/router.go) 的可变 services 参数只使用 services[0]，不是已实现的多集群注册表。
 - [Provider](../internal/infrastructure/kubeconfig/provider.go) 负责单集群凭据的加载来源，适合继续由各执行实例持有，不应承担平台集群目录职责。
 - [Catalog Service](../internal/application/catalog/service.go) 绑定一个集群和网关，存在实例内锁与后台回收任务。多集群第一阶段应隔离实例数据目录。
-- [认证服务](../internal/application/auth/service.go) 对 PAT 除验签外还查询本地 token 元数据，独立数据库不会自动认可另一实例签发的 PAT。
+- [认证服务](../internal/application/auth/service.go) 对 PAT 除格式与摘要校验外还查询 Setting 共用 Redis 的 token 元数据，操作器不维护独立 PAT 数据库。
 - 终端和上传/下载引用保存在实例内存，且绑定真实 UserID。它们需要上层路由保持实例一致性。
 
 本次也检查了 /Users/vincent/Desktop/codes.nosync/olixops-agent：已有 Agent 规格中的 cluster 字段及待接入规划，未看到已实现的完整集群目录。该项目的历史部署 Worker 规划与当前 k8s-ctl 已实现能力需要重新对齐，不能把旧 README 中的“ctl 仅骨架”当成当前事实。用户所指“已有所有集群信息的项目”的名称、路径及接口尚待确认；本次未修改 olixops-agent。
@@ -120,11 +120,9 @@ k8s-ctl 的 HTTP Handler 与可选 MCP Handler 共用 application 服务，不�
 
 ## 身份与现有 PAT
 
-服务间连接认证与用户身份是两个维度。统一服务账号可以标识网关，但不能把所有用户都变成该账号，否则终端归属、上传下载引用和未来 create-user-id 都会失真。
+当前实现使用调用者 JWT/PAT 直接访问操作器。Publish 在业务层完成服务和环境权限判断，k8s-ctl 使用公司 JWT 公钥或独立 PAT 公钥验证同一个 Bearer Token，并在下层 context 中保留真实 UserID。
 
-短期验证可使用上下游都信任、issuer/audience 一致的公司 JWT。正式接个人 PAT 时，推荐在统一入口校验 PAT 与撤销状态，再签发短期内部 JWT 传给执行实例；保留可信 UserID，绑定目标实例的 audience（例如 k8s-ctl:poc），实例验签。内部签名私钥仅由入口持有，执行实例只需要受信公钥。当前 company JWT 验证器可作为适配基础，但信任配置、声明与能力仍需明确实现和测试。
-
-不能仅透传任意 X-User-Id；也不能假设把各实例 PAT 公钥设成一样就足够，因为当前还有 token 数据库有效性校验。平台可以集中管理 PAT；无需为每个执行实例复制一份个人 token 数据库。资源所有者/admin 等细粒度授权按既定权限阶段推进，基础身份传递不能跳过。
+不能仅透传任意 X-User-Id，也不使用 Publish 自签的内部 JWT、独立注册控制 Token 或每个操作器单独维护的 PAT 数据库。资源所有者/admin 等细粒度授权由 Publish 负责，操作器继续执行身份有效性、目标隔离、会话归属与 Kubernetes RBAC。
 
 ## 会话、文件与状态数据
 

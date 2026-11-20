@@ -14,7 +14,6 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/stretchr/testify/require"
 	"olixops-k8s-ctl/internal/application"
-	authapp "olixops-k8s-ctl/internal/application/auth"
 	"olixops-k8s-ctl/internal/application/shell/interceptor"
 	"olixops-k8s-ctl/internal/domain"
 	authdomain "olixops-k8s-ctl/internal/domain/auth"
@@ -84,7 +83,7 @@ func TestAuthenticatedExecIntegration(t *testing.T) {
 	}
 	require.Equal(t, 401, request("", body).Code)
 	require.Zero(t, calls.Load())
-	token := f.company(t, nil, nil)
+	token := f.jwt(t, nil, nil)
 	w := request(token, body)
 	require.Equal(t, 200, w.Code)
 	require.Contains(t, w.Body.String(), "PONG")
@@ -129,12 +128,12 @@ func TestAuthenticatedExecIntegration(t *testing.T) {
 	policy.deny = false
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	pat, err := f.service.Create(authdomain.WithPrincipal(ctx, authdomain.Principal{UserID: "pat-user"}), authapp.CreateInput{Name: "exec-client", ExpiresAt: time.Now().Add(time.Hour)})
-	require.NoError(t, err)
+	pat := f.pat(t, "pat-user")
+
 	server := httptest.NewServer(engine)
 	defer server.Close()
 	client := mcp.NewClient(&mcp.Implementation{Name: "test", Version: "1"}, nil)
-	session, err := client.Connect(ctx, &mcp.StreamableClientTransport{Endpoint: server.URL + "/api/v1/mcp", HTTPClient: &http.Client{Transport: bearerTransport{pat.Token}}}, nil)
+	session, err := client.Connect(ctx, &mcp.StreamableClientTransport{Endpoint: server.URL + "/api/v1/mcp", HTTPClient: &http.Client{Transport: bearerTransport{pat}}}, nil)
 	require.NoError(t, err)
 	defer session.Close()
 	tools, err := session.ListTools(ctx, nil)

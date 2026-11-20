@@ -45,7 +45,7 @@ Gin + X-Request-Id
           已配置的 Kubernetes 集群
 ```
 
-- MCP 地址为 `http://127.0.0.1:8091/api/v1/pub/mcp`，不要求 REST 的 `X-Olixops-Control-Key`。启用写工具后，写调用同样没有调用者授权，请勿把已有 REST Key 误认为 MCP 的保护。
+- MCP 地址为 `http://127.0.0.1:8901/api/v1/pub/mcp`，不要求 REST 的 `X-Olixops-Control-Key`。启用写工具后，写调用同样没有调用者授权，请勿把已有 REST Key 误认为 MCP 的保护。
 - 使用 stateless Streamable HTTP、JSON 响应；无持久会话，无 stdio、旧版独立 SSE 入口。支持版本以 SDK 与客户端协商为准。
 - POST 承载 MCP JSON-RPC；GET/DELETE 在当前模式下由 SDK 返回 405，和 Kubernetes adapter 内部使用的 GET/PATCH/PUT/DELETE 无关。
 - MCP 使用协议规定的结果结构，不套 REST 的 `code/msg/data`。REST 保留现有响应与 API Key 行为。
@@ -193,7 +193,7 @@ Namespace 只通过专用工具管理。Namespace 元数据工具只处理 `meta
 初始化：
 
 ```bash
-curl -sS http://127.0.0.1:8091/api/v1/pub/mcp \
+curl -sS http://127.0.0.1:8901/api/v1/pub/mcp \
   -H 'Content-Type: application/json' \
   -H 'Accept: application/json, text/event-stream' \
   --data '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"manual-test","version":"1.0"}}}'
@@ -202,7 +202,7 @@ curl -sS http://127.0.0.1:8091/api/v1/pub/mcp \
 在初始化后，通过相同 URL 发送 tools/list 或 tools/call。stateless 模式不用 session ID：
 
 ```bash
-curl -sS http://127.0.0.1:8091/api/v1/pub/mcp \
+curl -sS http://127.0.0.1:8901/api/v1/pub/mcp \
   -H 'Content-Type: application/json' \
   -H 'Accept: application/json, text/event-stream' \
   -H 'MCP-Protocol-Version: 2025-11-25' \

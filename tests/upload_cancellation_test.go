@@ -87,7 +87,7 @@ func TestUploadFailureUnblocksStalledBody(t *testing.T) {
 	conn, err := net.Dial("tcp", server.Listener.Addr().String())
 	require.NoError(t, err)
 	defer conn.Close()
-	_, err = fmt.Fprintf(conn, "POST %s HTTP/1.1\r\nHost: %s\r\nAuthorization: Bearer %s\r\nContent-Type: application/octet-stream\r\nX-Upload-Id: %s\r\nContent-Length: 1048576\r\n\r\nA", application.UploadRoute, server.Listener.Addr().String(), f.company(t, nil, nil), ticket.UploadID)
+	_, err = fmt.Fprintf(conn, "POST %s HTTP/1.1\r\nHost: %s\r\nAuthorization: Bearer %s\r\nContent-Type: application/octet-stream\r\nX-Upload-Id: %s\r\nContent-Length: 1048576\r\n\r\nA", application.UploadRoute, server.Listener.Addr().String(), f.jwt(t, nil, nil), ticket.UploadID)
 	require.NoError(t, err)
 	select {
 	case <-backend.failed:

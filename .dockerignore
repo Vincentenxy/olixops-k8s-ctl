@@ -21,7 +21,7 @@ pkg/**
 # The runtime still needs one default config; local configs and secrets stay out.
 !configs
 configs/**
-!configs/config.container.yaml
+!configs/config.yaml
 
 # Tests are run separately, not shipped to the production image builder.
 **/*_test.go

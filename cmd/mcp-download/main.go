@@ -38,7 +38,7 @@ func main() {
 	}
 }
 func run() error {
-	endpoint := flag.String("url", "http://127.0.0.1:8091/api/v1/mcp", "authenticated MCP URL")
+	endpoint := flag.String("url", "http://127.0.0.1:8901/api/v1/mcp", "authenticated MCP URL")
 	tokenEnv := flag.String("token-env", "K8S_CTL_PAT", "PAT environment variable")
 	ns := flag.String("namespace", "", "Namespace")
 	pod := flag.String("pod", "", "Pod")

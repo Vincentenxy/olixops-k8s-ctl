@@ -14,7 +14,7 @@
 | --- | --- |
 | publish `CtlOperatorBootstrap.ensure()` | 不比较 Namespace 名单，不向下层下发名单；Namespace 不参与初始化缓存身份 |
 | `internal/interfaces/operator/registry.go` | 不要求提供 allowedNamespaces，不限制 Namespace 个数；旧字段兼容接收后丢弃，不参与配置摘要或实例装配 |
-| `cmd/operator/main.go`、`cmd/main.go` | 不向应用或 exec 执行器装配 Namespace 名单 |
+| `cmd/main.go` | 不向应用或 exec 执行器装配 Namespace 名单 |
 | `internal/application/cluster_service.go` | 删除通用名单判断；不再按名单过滤 Namespace 列表与统计；requireNamespace 仅检查名称格式 |
 | `internal/application/manifest.go` | 删除名单判断，保留请求目标与 YAML Namespace 必须一致的检查 |
 | `internal/application/operations.go` | Helm 渲染校验复用更新后的 Manifest 校验，不再做 Namespace 名单授权 |

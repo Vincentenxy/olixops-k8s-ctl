@@ -8,11 +8,11 @@
 
 - [ ] 细分 Kubernetes 列表旧 `continue` 游标的错误。实测事件第一页和新游标翻页正常，几分钟前的旧游标在两入口均映射为 `upstream_unavailable`，HTTP 503；需识别 ResourceExpired/Gone 等错误，返回稳定原因并提示重新从第一页查询，补契约测试。上游具体原因尚未透过当前接口取得，不能仅凭此现象断言游标已过期。
 - [ ] 按产品范围决定 publish 是否需要补代理当前其余 28 个操作器工具；不要重复实现 publish 已有的资源查询、发布与扩缩容业务。分别测试直接代理和已有平台业务，保留各自调用链证据。
-- [ ] 明确 Catalog 在平台接入模式中的职责。当前 `cmd/operator` 明确禁用 Catalog，其 16 个非端口工具未完成同一目标的上层链路验收；端口台账 5 个工具按本轮要求未测试。
+- [ ] 明确 Catalog 在平台接入模式中的职责。当前 `app.mode=operator` 明确禁用 Catalog，其 16 个非端口工具未完成同一目标的上层链路验收；端口台账 5 个工具按本轮要求未测试。
 
 ## 2026-11-13：联调临时放行与后续权限恢复
 
-按用户要求，当前 `configs/config.yaml`、平台本地操作器示例及实际联调配置设置 `pod-exec.authorization-enabled: false`、`shell.interceptor.enabled: false`。下层暂不执行 Pod 标签、批准 UID grants、宿主机共享、hostPath、privileged 或控制器自身 Pod 的资格策略；未配置开关仍默认启用，旧 diagnostics-only 模式不允许关闭。publish 原有业务权限系统未改动，身份、服务定位、会话归属、Pod UID、容器状态及文件完整性保留。
+当前 `configs/config.yaml` 的 operator 默认不启用 `pod-exec` 和 `shell`，只提供资源与日志能力。启用执行、终端或文件能力时必须显式配置，并保持 `pod-exec.authorization-enabled: true`；临时联调才允许明确关闭目标资格策略。Publish 原有业务权限系统未改动，身份、服务定位、会话归属、Pod UID、容器状态及文件完整性继续保留。
 
 - [ ] 流程验收后恢复目标授权开关，复用 publish 现有服务权限，明确上下层职责，避免恢复静态 Namespace 或逐 Pod grants 名单作为长期权限模型。
 - [ ] 将目标资格与命令策略接入独立权限扩展点，梳理特权、宿主机共享、hostPath 等目标的策略。
@@ -73,7 +73,7 @@
 - [x] 逐项对照 MCP 补齐下层常用资源 HTTP 接口，增加主 Shell、持续终端 open/write/read/close、文件上传/下载准备引用入口；复用 application 服务并同步 API 文档与入口规范。
 - [x] 解耦 Pod exec / Shell 业务开关与主 MCP 开关，验证关闭主 MCP 时认证 HTTP 仍可执行；保留独立拦截器、用户身份及范围检查，不误移除内部 Kubernetes MCP 执行组件。
 - [x] k8s-ctl 增加 cluster.id、runtimeId 和认证后的能力信息，统一 catalog.cluster 来源；上层注册核对另行实现。
-- [ ] 明确 JWT/PAT 的上下游身份传递；保留真实 UserID，不把统一服务账号当成每个开发人员。当前 PAT 依赖实例 token 数据库，不能仅靠公钥共享。
+- [x] 2026-11-19 统一 JWT/PAT 上下游身份传递；Publish 透传当前调用者 Bearer，操作器用公司 JWT 公钥或平台 PAT 专用公钥验签，保留真实 UserID，不把统一服务账号当成每个开发人员。
 - [ ] 上层 REST/MCP 增加明确 clusterId，统一工具 schema/能力适配，通过内部 HTTP 调用单集群业务并转换响应/错误；工作流固定目标，无静默跨集群回退。
 - [ ] Shell 会话、上传/下载引用绑定 clusterId、backendId、运行实例及用户，文件通过统一入口流式代理，保留 Content-Length、取消及错误语义。
 - [ ] 文件代理使用有限缓冲与背压，验证网关缓冲/请求体/超时、上传长度、下载中断、取消清理和单次引用不盲目重试；后续再评估独立传输网关或短期凭证直连。

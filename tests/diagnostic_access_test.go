@@ -50,7 +50,7 @@ func TestDiagnosticOnlyMCPAndRESTEnforcePerUserGrants(t *testing.T) {
 	require.Error(t, err)
 	engine, err := router.NewWithAuth(f.cfg, service, nil, f.service)
 	require.NoError(t, err)
-	raw := f.company(t, nil, nil)
+	raw := f.jwt(t, nil, nil)
 	request := func(method, path, token, body string) *httptest.ResponseRecorder {
 		r := httptest.NewRequest(method, path, strings.NewReader(body))
 		r.Header.Set("Authorization", "Bearer "+token)
@@ -67,7 +67,7 @@ func TestDiagnosticOnlyMCPAndRESTEnforcePerUserGrants(t *testing.T) {
 	require.Equal(t, 200, request("POST", "/api/v1/cluster/pods/exec", raw, body).Code)
 	require.Equal(t, int32(1), backend.calls.Load())
 	// A different verified user is denied before any Kubernetes query.
-	other := f.company(t, func(c jwt.MapClaims) { c["staffuserid"] = "other-user" }, nil)
+	other := f.jwt(t, func(c jwt.MapClaims) { c["staffuserid"] = "other-user" }, nil)
 	before := calls.Load()
 	require.Equal(t, 403, request("POST", "/api/v1/cluster/pods/exec", other, body).Code)
 	require.Equal(t, 403, request("POST", "/api/v1/cluster/pods/logs", other, `{"namespace":"demo","pod":"app","container":"app"}`).Code)

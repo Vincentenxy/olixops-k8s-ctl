@@ -2,9 +2,11 @@
 
 > 2026-11-06 认证更新：已实现可选公司 JWT/PAT 认证。`auth.enabled=true` 时业务接口需要 Bearer，MCP 改为 `/api/v1/mcp`（Higress 下加 `/k8sctl`），旧 `/api/v1/pub/mcp` 不注册。本文原公开入口/API key 或待实现认证描述仅适用于旧兼容模式；资源级授权仍待实现。配置、令牌接口与迁移见 [认证接入说明](authentication.md)。
 
-镜像提供 HTTP 与 MCP 服务，包含 kubectl、Helm 3 和 CA 证书。SQLite 内嵌在应用中，不需要部署数据库服务。镜像以 UID/GID 10001 运行；数据库写入 `/data/olixops.db`，CLI 临时文件使用 `/tmp`，Helm 缓存使用用户主目录，这些位置需要可写。
+默认镜像是 publish 动态操作器，包含 kubectl、Helm 3、managed Kubernetes MCP 执行程序和 CA 证书。publish 负责对外 MCP、服务权限和 kubeconfig 注册，操作器提供认证 HTTP 调用。镜像以 UID/GID 10001 运行，CLI 临时文件使用 `/tmp`，Helm 缓存使用用户主目录，这些位置需要可写。单集群版本的 SQLite 内嵌在应用中，数据库写入 `/data/olixops.db`；默认操作器不启用 Catalog/PAT 数据库。
 
 ## 构建镜像
+
+本文默认命令构建统一 k8s-ctl 镜像。通过 `configs/config.yaml` 的 `app.mode` 选择 `operator` 或 `standalone`，对应 Chart 2.2.8 values 和运行方式见 [平台操作器 Helm 部署](../deployments/helm/README.md)。镜像从固定 digest 的上游 v0.1.2 镜像复制 managed 执行程序，不依赖在业务集群安装 sidecar。
 
 在项目根目录执行。以下命令生成本地测试标签；部署清单中的 Harbor 镜像地址需使用实际推送的版本：
 
@@ -24,7 +26,7 @@ docker buildx build \
   --platform linux/amd64 \
   --build-arg BASE_IMAGE_REGISTRY=m.daocloud.io/docker.io \
   --build-arg GOPROXY=https://goproxy.cn,direct \
-  -t harbor.gtjaqh.net/lucy-dev/k8s-ctl:0.0.1-alpha.8 \
+  -t harbor.gtjaqh.net/lucy-dev/k8s-ctl:0.0.1-alpha.2 \
   --push \
   .
 ```
@@ -54,26 +56,26 @@ docker push registry.example.com/olixops/olixops-k8s-ctl:0.2.0
 
 Dockerfile 默认使用 Docker Hub 的 `golang:1.26-alpine` 构建、`alpine:3.22` 运行。通过 `--build-arg BASE_IMAGE_REGISTRY=...` 统一覆盖基础镜像仓库前缀；也可通过 `--build-arg GO_IMAGE=... --build-arg RUNTIME_IMAGE=...` 分别指定完整镜像地址，优先于仓库前缀。运行基础镜像需提供兼容 Alpine 的 apk 仓库以及 kubectl、Helm 3 包。
 
-镜像只复制 Go 源码、依赖清单和容器专用配置，不复制开发用的 `configs/config.yaml`。真实 kubeconfig、API key、SQLite 文件不应放入构建内容；依赖下载认证也不要使用 Docker ARG 传递。
+镜像只复制 Go 源码、依赖清单和唯一的 `configs/config.yaml`。真实 kubeconfig、API key、SQLite 文件不应放入构建内容；依赖下载认证也不要使用 Docker ARG 传递。
 
 ## 构建内容与缓存
 
 `.dockerignore` 使用白名单，默认排除所有内容，仅允许以下文件进入 Docker 构建上下文：
 
 - `go.mod`、`go.sum`、Docker 构建定义
-- `cmd/main.go`、`cmd/pat/*.go`
+- `cmd/main.go`
 - `internal/**/*.go`、`pkg/**/*.go`，排除 `*_test.go`
-- `configs/config.container.yaml`，作为运行时默认配置
+- `configs/config.yaml` 作为所有运行模式的运行时默认配置
 
-Agent 生成的文档、报告、Skills、截图、PPT/PDF、README、AGENTS、测试记录、部署清单、测试源码、其他入口以及本地数据不会发送到构建器。开发配置、`.env`、kubeconfig 和本地 Secret 也不在白名单中。以后增加嵌入资源或新的构建入口时，应同时更新白名单及 Dockerfile，避免遗漏编译依赖。
+Agent 生成的文档、报告、Skills、截图、PPT/PDF、README、AGENTS、测试记录、部署清单、测试源码及本地数据不会发送到构建器。开发配置、`.env`、kubeconfig 和本地 Secret 也不在白名单中。以后增加嵌入资源或新的构建入口时，应同时更新白名单及 Dockerfile，避免遗漏编译依赖。
 
-Go 源码仅在 build 阶段编译；最终镜像不携带源码、Go 编译器或文档，只保留服务/PAT 二进制、kubectl、Helm、CA 证书和容器默认配置。生产打包不运行测试，测试在独立流程执行。
+Go 源码仅在构建阶段编译；最终镜像不携带源码、Go 编译器或文档。统一镜像包含操作器、单集群服务、PAT 验证和上游 managed 执行程序，运行模式由 `app.mode` 选择。生产打包不运行测试，测试在独立流程执行。
 
 缓存按以下方式组织：
 
 1. 先复制 `go.mod`、`go.sum` 并下载模块。仅修改业务源码不会使这一步失效。
 2. 使用 BuildKit 的 `/go/pkg/mod` 和 `/root/.cache/go-build` 缓存，复用原有缓存路径；模块未变化时避免重复下载，源码变化时复用未变化包的编译结果。
-3. 一次 `go build` 构建服务与 PAT，避免重复启动独立的编译流程。
+3. 统一入口一次 `go build` 同时覆盖两种运行模式。共用依赖、源码阶段与 Go 缓存，不编译重复入口。
 4. 独立 `runtime-base` 阶段安装运行依赖，与源码编译无关，BuildKit 可并行准备；源码修改不会重新安装工具。
 5. 文档和测试文件不进入上下文，它们的变更不会使生产源码复制/编译层失效。
 
@@ -107,6 +109,18 @@ Docker Hub 获取 Alpine 3.22 元数据时连接被拒绝，改用 `--build-arg 
 运行检查通过：UID/GID 10001、`/data` 可写、两个二进制与默认配置存在；`/app` 只有这三个文件，没有源码/文档；kubectl 客户端与 Helm 3 可执行。未连接真实 Kubernetes 集群。
 
 同一 builder、相同参数和相同内容重复完整构建，13 个步骤命中缓存，本机耗时 1.23 秒。该数字仅为本次热缓存验证，不能代表首次构建或源码改动后的耗时。`go test ./...`、`go vet ./...` 通过；Dockerfile 和 ignore 文件的 diff 空白检查通过。
+
+### 默认操作器验证（2026-11-16）
+
+统一 Dockerfile 实际构建 Linux amd64 镜像成功，检查入口为 `/app/k8s-ctl`，用户为 `10001:10001`。使用临时注册凭据与 RSA 公钥挂载配置，将 `app.mode` 设为 `operator`，以 `--network none` 启动容器；无需启动 kubeconfig，日志为 `platform operator started`，进程健康接口返回 `{"code":0,"data":{"operator":true},"msg":""}`。
+
+统一镜像将 `app.mode` 改为 `standalone` 后可运行独立单集群服务。`go test ./...`、`go vet ./...`、`git diff --check` 通过。
+
+本次构建使用缓存的 Go/Alpine 层，`KUBERNETES_MCP_IMAGE` 指定此前准备的本地同版本 `k8sctl-upstream:local-v0.1.2`，没有验证默认 quay.io 镜像的网络下载。测试容器和临时凭据已清理；未连接真实集群、推送镜像或更新线上部署。新默认值只对重新构建的镜像生效。
+
+## 单集群兼容部署
+
+以下 catalog.yaml、InCluster、SQLite/PVC 和旧 API key 说明适用于 `app.mode: standalone`。统一镜像无需切换 Docker target，修改挂载的 `config.yaml` 后重启即可。publish 动态操作器请使用 [Chart 2.2.8 部署包](../deployments/helm/README.md)。
 
 ## 部署前准备
 
@@ -159,7 +173,7 @@ kubectl -n olixops logs deployment/olixops-k8s-ctl --tail=100
 
 SQLite 当前只支持一个运行副本，因此保留 `replicas: 1` 和 `strategy: Recreate`。新 PVC 只会初始化默认模板及端口池；原来本机 SQLite 的配置和端口记录不会自动迁移。迁移请先停止原进程并执行一致性备份，避免两个服务同时协调同一个入口。
 
-应用读取 `/app/configs/config.yaml`。集群中该文件由 `olixops-k8s-ctl-config` ConfigMap 的 `config.yaml` 挂载提供，直接修改 `deployments/catalog.yaml` 中 `data.config.yaml` 即可设置监听地址、MCP、Kubernetes 写开关、数据库路径、Higress 和端口范围；Deployment 不设置运行时环境变量。`configs/config.container.yaml` 是镜像内置的同内容默认配置，调整镜像默认值时同步维护。
+应用读取 `/app/configs/config.yaml`。集群中该文件由 `olixops-k8s-ctl-config` ConfigMap 的 `config.yaml` 挂载提供，直接修改 `deployments/catalog.yaml` 中 `data.config.yaml` 即可设置运行模式、监听地址、MCP、Kubernetes 写开关、数据库路径、Higress 和端口范围。Deployment 不设置运行时环境变量。
 
 `control.api-key` 保持空，`control.api-key-file` 指向 Secret 挂载文件。读取失败或空文件会阻止启动，错误信息不包含文件内容；两种 key 来源不能同时配置。应用只在启动时读取配置和 key，修改 ConfigMap 或 Secret 后执行：
 
@@ -175,7 +189,7 @@ kubectl -n olixops rollout status deployment/olixops-k8s-ctl --timeout=180s
 
 ## Higress 的 /k8sctl 访问前缀
 
-服务自身路由仍是 `/api/v1/...`。Ingress 匹配 `/k8sctl(/|$)(.*)` 并重写为 `/$2`，去掉外部前缀；不需要修改 Go 路由或容器健康检查。Ingress 和后端 Service 均在 `olixops` Namespace，后端引用 Service 的 `http` 端口（8091）。
+服务自身路由仍是 `/api/v1/...`。Ingress 匹配 `/k8sctl(/|$)(.*)` 并重写为 `/$2`，去掉外部前缀；不需要修改 Go 路由或容器健康检查。Ingress 和后端 Service 均在 `olixops` Namespace，后端引用 Service 的 `http` 端口（8901）。
 
 外部访问路径示例：
 
@@ -213,18 +227,18 @@ curl -fsS -H 'Host: efficient-lab.qiuer.net' \
 ## 检查服务并连接 MCP
 
 ```bash
-kubectl -n olixops port-forward service/olixops-k8s-ctl 8092:8091
+kubectl -n olixops port-forward service/olixops-k8s-ctl 8902:8901
 ```
 
 另开终端检查：
 
 ```bash
-curl -fsS http://127.0.0.1:8092/api/v1/pub/health
-curl -fsS http://127.0.0.1:8092/api/v1/pub/ready
-codex mcp add k8s-ctl-cluster --url http://127.0.0.1:8092/api/v1/pub/mcp
+curl -fsS http://127.0.0.1:8902/api/v1/pub/health
+curl -fsS http://127.0.0.1:8902/api/v1/pub/ready
+codex mcp add k8s-ctl-cluster --url http://127.0.0.1:8902/api/v1/pub/mcp
 ```
 
-使用本地 8092 以便与开发进程的 8091 区分；port-forward 终端需要保持运行。健康检查只证明 HTTP 进程可用；通过 MCP 的 `cluster_status`、`list_service_templates`、`list_storage_classes` 再确认集群连接、目录与读取权限，真实部署前调用 `sync_gateway_ports` 核对入口占用。
+使用本地 8902 以便与开发进程的 8901 区分；port-forward 终端需要保持运行。健康检查只证明 HTTP 进程可用；通过 MCP 的 `cluster_status`、`list_service_templates`、`list_storage_classes` 再确认集群连接、目录与读取权限，真实部署前调用 `sync_gateway_ports` 核对入口占用。
 
 ## 本次验证（2026-10-26）
 

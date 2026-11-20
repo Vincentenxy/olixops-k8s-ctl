@@ -1,18 +1,18 @@
 # olixops-k8s-ctl
 
-当前联调分支临时关闭下层 Pod 执行权限检查：`pod-exec.authorization-enabled: false`，并关闭 `shell.interceptor.enabled`，用于通过 publish 验证 Shell、终端和文件传输。无需给 Pod 添加 `k8s-ctl/exec-enabled` 标签，也不读取静态 grants；宿主机共享、hostPath、privileged 和控制器自身 Pod 的资格策略同样暂不拦截。未配置该开关时默认继续执行原有检查，`diagnostics-only` 不允许关闭检查。身份认证、publish 原有业务权限、服务到 Pod 定位、容器状态、Pod UID、会话归属、文件单次引用和完整性校验继续生效；Kubernetes RBAC 和容器文件系统权限不受此开关改变。后续恢复权限控制时，将两项开关开启并实现独立策略，详见 [下一步待办](docs/roadmap.md)。
+当前 `configs/config.yaml` 的 operator 默认只提供资源查询和 Pod 日志，`pod-exec` 与 `shell` 可选能力不配置。需要单次 Shell、终端或文件上传下载时，按 [配置示例](configs/config.example.yaml) 显式开启；开启后默认执行目标授权、Pod UID、会话归属、文件引用和 Kubernetes RBAC 检查。`authorization-enabled: false` 仅用于明确授权的临时联调，不应作为生产默认值。
 
 `olixops-k8s-ctl` 是一个面向受控 Kubernetes 集群的控制服务。它把 Kubernetes 查询、清单校验、常用工作负载操作和 Helm 操作封装成 HTTP API 与 MCP 工具，服务默认监听本机回环地址，并通过固定的集群、Namespace、资源类型和参数边界降低误操作风险。
 
-当前版本已支持 **公司 RS256 JWT 与个人 PAT 认证**，REST 和 MCP 共用认证链路；PAT 支持个人创建、列表、撤销、到期与数据库有效性校验。认证为显式迁移开关：仓库示例仍为 `auth.enabled: false`，需准备密钥后开启，完整步骤见 [认证接入说明](docs/authentication.md)。开启认证时 MCP 使用 `/api/v1/mcp`，旧公开入口不注册。**资源级细粒度授权、审批和完整审计仍未实现**，Authorizer 仍默认放行；原有写开关、资源范围与 Kubernetes RBAC 继续生效。
+当前版本已支持 **公司 RS256 JWT 与平台个人 PAT 认证**，REST 和 MCP 共用认证链路。平台操作器和独立认证模式分别使用配置中的 JWT 公钥与 PAT 专用公钥验签；k8s-ctl 不连接 Setting Redis、不签发或保存个人 PAT，撤销和业务权限由 Publish/Setting 链路负责。独立兼容入口仍保留旧 Control API key。认证为显式迁移开关：仓库示例需准备密钥后开启，完整步骤见 [认证接入说明](docs/authentication.md)。开启认证时 MCP 使用 `/api/v1/mcp`，旧公开入口不注册。**资源级细粒度授权、审批和完整审计仍未实现**，Authorizer 仍默认放行；原有写开关、资源范围与 Kubernetes RBAC 继续生效。
 
 ## publish 本地操作器接入（2026-11-13）
 
 Namespace 检查调整：已取消 publish 与 k8s-ctl 的静态 Namespace 名单限制；平台通过服务权限授权，按服务 ID 与环境解析目标 Namespace。认证、Pod 执行资格和会话归属仍保留。调整范围与验证见 [Namespace 与容器操作拦截清单](docs/namespace-interception-audit.md)。
 
-新增 `cmd/operator`：publish 从 `cluster_info` 读取加密 kubeconfig，经既有 EnvVault 模块解密后注册到本地控制器；业务集群无需部署 k8s-ctl。操作器按 clusterId 创建隔离运行实例，上层通过 `/clusters/{clusterId}/api/v1/...` 调用原有 HTTP 能力，对外仍由 publish 的 `/pubops/mcp` 提供日志、Shell、终端及文件工具。原 `cmd/main.go` 的单集群独立使用方式保留。
+统一 `cmd/main.go` 根据 `app.mode` 选择运行入口。`operator` 模式由 publish 从 `cluster_info` 读取加密 kubeconfig，经既有 EnvVault 模块解密后注册到本地控制器；业务集群无需部署 k8s-ctl。操作器按 clusterId 创建隔离运行实例，上层通过 `/clusters/{clusterId}/api/v1/...` 调用原有 HTTP 能力，对外仍由 publish 的 `/pubops/mcp` 提供日志、Shell、终端及文件工具。`standalone` 模式保留单集群独立使用方式。
 
-当前 publish 开发目录固定为 `/Users/vincent/IdeaProjects/efficient-platform/publish-devops-api`，不再修改 tmp-code 中的旧版本。架构、内部注册认证、凭据边界、配置和验证范围见 [本地操作器接入](docs/platform-local-operator.md)；配置模板见 [平台操作器配置](configs/config.platform-operator.example.yaml)。下文历史“未实现多集群”和每集群部署方案指原独立入口，请以新增操作器说明为准。真实链路验收结果单独记录，不以工具可发现或编译通过代表集群验收通过。
+当前 publish 开发目录固定为 `/Users/vincent/IdeaProjects/efficient-platform/publish-devops-api`，不再修改 tmp-code 中的旧版本。架构、内部注册认证、凭据边界、配置和验证范围见 [本地操作器接入](docs/platform-local-operator.md)；系统配置统一使用 [configs/config.yaml](configs/config.yaml)，通过 `app.mode` 选择运行入口。下文历史“未实现多集群”和每集群部署方案指原独立入口，请以新增操作器说明为准。真实链路验收结果单独记录，不以工具可发现或编译通过代表集群验收通过。
 
 ## 当前功能清单
 
@@ -20,7 +20,7 @@ Namespace 检查调整：已取消 publish 与 k8s-ctl 的静态 Namespace 名�
 
 ### 已实现的业务能力
 
-认证补充（2026-11-06）：支持公司 JWT 验签、可信用户 context、个人 PAT 签发/列表/撤销、SQLite 有效状态检查、每用户 10 个有效 PAT 限额，以及本地管理员离线签发首个 PAT。配置与接口见 [JWT/PAT 认证](docs/authentication.md)。
+认证补充：平台操作器支持公司 JWT 与独立 PAT 公钥验签，并将可信用户写入 context。个人 PAT 的签发、列表、撤销和限额由平台 Setting 负责；Publish 在转发前执行状态与业务权限检查。k8s-ctl 不提供本地 PAT 签发工具。配置与边界见 [JWT/PAT 认证](docs/authentication.md)。
 
 | 模块 | 当前可用功能 | 主要源码入口 |
 | --- | --- | --- |
@@ -71,7 +71,7 @@ Pod/Deployment 等白名单资源的创建和一般更新走通用 YAML apply，
 
 ### 预留或尚未实现的能力
 
-- **资源权限**：JWT/PAT 认证与个人令牌归属已实现；专用诊断入口已支持精确用户 grant；其他资源的细粒度授权、按用户隔离、审批和完整审计尚未实现，默认 Authorizer 放行。平台没有本地密码登录，需公司 JWT 或管理员离线 PAT 引导。
+- **资源权限**：JWT/PAT 认证与个人令牌归属已实现；专用诊断入口已支持精确用户 grant；其他资源的细粒度授权、按用户隔离、审批和完整审计尚未实现，默认 Authorizer 放行。平台没有本地密码登录，需公司 JWT 或平台 Setting 签发的个人 PAT。
 - **多集群与凭据中心**：没有多集群注册/切换；数据库 kubeconfig Provider 只有适配接口，尚未接入加密持久化与轮换实现。
 - **高可用与恢复**：SQLite 和进程内锁按单副本协调器设计；没有多副本部署协调、集群自动修复、数据库备份恢复或通用事务回滚。
 - **Operator 与通用资源范围**：已有 Redis Operator 演示清单和测试记录，但标准目录尚未接入 Operator；任意 CRD/自定义资源、Secret CRUD、RBAC 管理、节点操作尚未开放；Pod exec、持续终端和文件传输已有显式启用的受控入口。
@@ -166,7 +166,7 @@ flowchart TB
 | Higress | 外部 `/k8sctl/...` 去掉前缀后转发到服务 | 本地访问可以直接进入 Gin；应用路由不重复添加此前缀 |
 | 全局中间件 | Request ID、访问日志、异常恢复 | 使用 `pkg/logger`；响应回写 `X-Request-Id` |
 | 公开路由 | `/api/v1/pub/health`、`/api/v1/pub/ready` | 无需业务认证的健康与就绪检查 |
-| 认证模式 | `Authorization: Bearer ...`，主 MCP 为 `/api/v1/mcp` | JWT 验签；PAT 额外查询数据库有效性；身份写入 context |
+| 认证模式 | `Authorization: Bearer ...`，主 MCP 为 `/api/v1/mcp` | JWT/PAT 分别使用独立公钥验签；身份写入 context，PAT 状态与业务权限由 Publish/Setting 检查 |
 | 旧兼容模式 | `auth.enabled=false` 时，受保护 REST 使用 ControlKey，MCP 可位于 `/api/v1/pub/mcp` | 不是 JWT/PAT 的资源隔离方案；开放情况仍受配置限制 |
 | 接口适配 | REST 解析请求；MCP 校验工具输入并映射业务方法 | REST 通常返回 `{code,msg,data}`，MCP 使用标准 JSON-RPC；下载成功返回二进制流 |
 | 工具注册 | 根据 MCP、写开关、Catalog、Pod Exec、Shell、diagnostics-only 配置决定工具集合 | 工具可见性是功能开关，不等于逐用户资源授权 |
@@ -267,7 +267,7 @@ MCP 负责准备引用，HTTP 负责文件字节，避免将大文件放进模�
 | 状态 | 保存位置 | 重启与多副本边界 |
 | --- | --- | --- |
 | 模板、实例、修订、部署、端口及事件 | Catalog SQLite | 需持久卷；当前协调方案按单副本设计 |
-| PAT 哈希、归属、撤销与有效状态 | 独立 Auth SQLite | 需持久化；不是终端会话存储 |
+| PAT 哈希、归属、撤销与有效状态 | 平台 Setting/Publish 负责 | k8s-ctl 只验签并读取 Token claims，不保存独立 PAT 数据库，也不连接 Redis |
 | 终端会话及缓冲 | 本实例内存 | 重启丢失，尚无跨实例路由 |
 | 上传与下载引用 | 本实例内存 | 短期、用户绑定、单次使用；重启失效，尚无共享引用存储 |
 | 工作负载、Service、PVC、网关等实际资源 | Kubernetes | 以集群回读为准，不能只凭本地台账判断运行结果 |
@@ -372,6 +372,8 @@ sequenceDiagram
 
 ## 打包部署
 
+publish 动态多集群操作器的 Chart 2.2.8 values 见 [deployments/helm](deployments/helm/README.md)：使用统一 Docker 镜像并将 `app.mode` 设为 `operator`，由 publish 注册 kubeconfig。该 values 开启 HTTP/Shell/终端/文件，注册凭据与平台公钥通过 Secret 或环境变量注入，不使用 InCluster 身份或 SQLite，不创建外部 Ingress。仓库模板中的凭据留空，部署前填写。
+
 平台下层控制器的独立部署包位于 [deployments/platform](deployments/platform/README.md)，与旧 `catalog.yaml` 分开。默认入口启用 JWT 认证 HTTP、资源写操作与 Helm；完整入口增加 Shell/终端/文件及 Catalog。两种入口均使用 InCluster ServiceAccount、独立 `olixops-platform` Namespace，主 MCP 默认关闭，用户权限由 `publish-devops-api` 在调用前检查。先准备平台公钥 Secret、替换镜像和 Namespace/RBAC，再选择 `kubectl apply -k deployments/platform` 或 `deployments/platform/full`；配置说明、接入检查脚本与迁移注意事项见包内 README。
 
 在项目根目录执行；首次推送或登录过期时先登录 Harbor：
@@ -383,22 +385,24 @@ docker buildx build \
   --platform linux/amd64 \
   --build-arg BASE_IMAGE_REGISTRY=m.daocloud.io/docker.io \
   --build-arg GOPROXY=https://goproxy.cn,direct \
-  -t harbor.gtjaqh.net/lucy-dev/k8s-ctl:0.0.1-alpha.8 \
+  -t harbor.gtjaqh.net/lucy-dev/k8s-ctl:0.0.1-alpha.2 \
   --push \
   .
 ```
 
 `BASE_IMAGE_REGISTRY` 指定基础镜像仓库前缀，`GOPROXY` 指定构建阶段的 Go 模块代理。`--push` 构建后直接推送到 Harbor。
 
-构建上下文采用 [.dockerignore](.dockerignore) 白名单：只允许服务/PAT 入口、`internal`/`pkg` 生产 Go 源码、`go.mod`/`go.sum` 和容器默认配置进入。Agent 文档、README、测试记录、测试源码、其他本地配置和本地产物均排除；运行镜像只包含二进制、CLI 与必要配置。模块下载、Go 编译和运行依赖分别缓存，两个二进制合并编译。常规构建复用同一个 buildx builder，避免使用 `--no-cache`；首次下载和编译仍需时间。详见 [构建内容与缓存](docs/container-deployment.md#构建内容与缓存)。
+Dockerfile 默认构建统一 k8s-ctl 镜像，启动 `/app/k8s-ctl`；上面的命令无需添加 `--target`。运行模式由 `/app/configs/config.yaml` 的 `app.mode` 决定。publish 注册 kubeconfig 后按 clusterId 建立操作实例，主 MCP 由 publish 对外提供。部署配置见 [Chart 2.2.8 操作器部署包](deployments/helm/README.md)。
+
+构建上下文采用 [.dockerignore](.dockerignore) 白名单：只允许统一启动入口、`internal`/`pkg` 生产 Go 源码、`go.mod`/`go.sum` 和唯一的 `configs/config.yaml` 进入。Agent 文档、README、测试记录、测试源码、其他本地配置和本地产物均排除；运行镜像只包含二进制、CLI 与必要配置。模块下载、Go 编译和运行依赖分别缓存。常规构建复用同一个 buildx builder，避免使用 `--no-cache`；首次下载和编译仍需时间。详见 [构建内容与缓存](docs/container-deployment.md#构建内容与缓存)。
 
 ## 快速启动
 
 开发环境需要 Go 1.26、能够访问目标集群的 kubeconfig，以及执行写操作时可用的 `kubectl` 和 Helm 3。client-go 查询不依赖 kubectl/Helm；Dockerfile 已加入这两个 CLI 的安装步骤，并为 SQLite 创建非 root 可写的 `/data`；完整容器构建还需基础镜像仓库网络可用。
 
-容器构建、镜像推送和 Kubernetes 部署步骤见 [容器部署文档](docs/container-deployment.md)。Dockerfile 使用独立的 `configs/config.container.yaml`，默认监听 `0.0.0.0:8091`、使用 InCluster Provider；集群部署通过 ConfigMap 挂载配置文件，API key 从 Secret 挂载文件读取，不需要配置运行时环境变量。支持通过 buildx 构建 Linux amd64/arm64 镜像，SQLite 仍使用单副本 PVC。
+容器构建、镜像推送和 Kubernetes 部署步骤见 [容器部署文档](docs/container-deployment.md)。镜像只包含统一的 `configs/config.yaml`，实际部署通过 ConfigMap 挂载配置，并将 `app.mode` 设为 `operator` 或 `standalone`。凭据和平台公钥通过 Secret 或环境变量注入。支持通过 buildx 构建 Linux amd64/arm64 镜像。
 
-[部署清单](deployments/catalog.yaml) 包含 Namespace、ServiceAccount、ConfigMap、PVC、Deployment、Service 和 Higress Ingress。外部访问前缀为 `/k8sctl`，Higress 去掉此前缀后转发到应用；例如外部 MCP 路径为 `/k8sctl/api/v1/pub/mcp`。部署域名为 `efficient-lab.qiuer.net`，部署前核对镜像地址、API key Secret、ServiceAccount 的 RBAC 和域名/TLS。
+[旧版 standalone 部署清单](deployments/catalog.yaml) 包含 Namespace、ServiceAccount、ConfigMap、PVC、Deployment、Service 和 Higress Ingress；Publish 对接的 operator 部署请使用 [Chart values](deployments/helm/values.operator-2.2.8.yaml)。外部访问前缀为 `/k8sctl`，Higress 去掉此前缀后转发到应用；例如外部 MCP 路径为 `/k8sctl/api/v1/pub/mcp`。部署域名为 `efficient-lab.qiuer.net`，部署前核对镜像地址、认证 Secret、ServiceAccount 的 RBAC 和域名/TLS。
 
 集群内部署使用 Pod 的 ServiceAccount 连接本集群，无需挂载本机 kubeconfig。[RBAC 基础配置](deployments/rbac.yaml) 提供 `wx-test-ns-001`、`wx-test-ns-002` 业务资源权限、集群必要查询权限、Namespace 创建权限和指定 Higress 入口的更新权限，需单独核对并应用；新 Namespace 的业务资源操作仍需额外 RoleBinding，Namespace 更新/删除及 Helm release Secret 写入未默认授予。步骤和边界见 [Kubernetes 权限说明](docs/kubernetes-rbac.md)。
 
@@ -406,15 +410,22 @@ Redis Operator 的真实集群测试清单见 [redis-operator-demo.yaml](deploym
 
 ```bash
 go run ./cmd
-curl -sS http://127.0.0.1:8091/api/v1/pub/health
+curl -sS http://127.0.0.1:8901/api/v1/pub/health
 ```
 
 默认配置来自 `configs/config.yaml`：
 
 ```yaml
+app:
+  # Publish 对接必须使用 operator；standalone 只服务本地或集群内固定 kubeconfig
+  mode: operator
+operator:
+  max-clusters: 16
 server:
   host: 127.0.0.1
-  port: 8091
+  port: 8901
+auth:
+  enabled: true
 kubernetes:
   in-cluster: false
   kubeconfig:
@@ -424,20 +435,13 @@ kubernetes:
     context: ""
   write-enabled: true
 mcp:
-  enabled: true
-  write-enabled: true
+  # 主 MCP 由 Publish 对外提供，操作器自身通常关闭
+  enabled: false
 catalog:
-  enabled: true
-  database-path: ./data/olixops.db
-  gateway-id: higress
-  gateway-namespace: higress-system
-  gateway-service: higress-gateway
-  gateway-name: higress-tcp-gateway
-  port-start: 30000
-  port-end: 30200
+  enabled: false
 ```
 
-集群部署直接修改 `deployments/catalog.yaml` 中 ConfigMap 的 `data.config.yaml`，监听地址、MCP/写开关、Higress 和端口池均在该文件内。API key 通过 `control.api-key-file: /app/secrets/control/api-key` 引用 Secret 挂载文件。修改 ConfigMap 或 Secret 后需要重启 Deployment；应用不会热加载。镜像默认配置位于 `configs/config.container.yaml`。
+运行模式、监听地址、认证、MCP 和能力开关都在同一份 `config.yaml` 中。Publish 对接使用 `app.mode: operator`，通过 `/api/v1/operator/clusters/configure` 注册集群并访问 `/clusters/{clusterId}/...`；需要固定 kubeconfig 的单集群部署才使用 `app.mode: standalone`。两种模式都使用同一个 `server.port`，当前统一为 8901。操作器部署参考 [Chart values](deployments/helm/values.operator-2.2.8.yaml) 和 [Publish 接入说明](docs/platform-local-operator.md)。修改 ConfigMap 或 Secret 后需要重启 Deployment；应用不会热加载。镜像默认配置位于 `configs/config.yaml`。
 
 环境变量覆盖能力仍兼容原有本地启动方式，集群部署不依赖它：
 
@@ -446,7 +450,7 @@ catalog:
 | `SERVER_HOST` / `SERVER_PORT` / `SERVER_MODE` | 监听地址、端口和 Gin 模式 |
 | `KUBERNETES_IN_CLUSTER` | 在集群内使用 ServiceAccount Provider |
 | `KUBERNETES_KUBECONFIG_SOURCE` / `..._PATH` / `..._REFERENCE` / `..._CONTEXT` | 选择 kubeconfig Provider 和 context |
-| `KUBERNETES_ALLOWED_NAMESPACES` | 限制可见和可操作 Namespace；空列表表示不限制 |
+| `KUBERNETES_ALLOWED_NAMESPACES` | 已废弃并忽略；Namespace 访问范围由 Publish 权限和 Kubernetes RBAC 决定 |
 | `KUBERNETES_WRITE_ENABLED` | Kubernetes 变更总开关；不阻止目录的数据库写入 |
 | `KUBERNETES_COMMAND_TIMEOUT_SECONDS` | kubectl/Helm 写操作超时 |
 | `KUBERNETES_KUBECTL` / `KUBERNETES_HELM` | CLI 路径 |
@@ -455,9 +459,10 @@ catalog:
 | `CATALOG_ENABLED` / `CATALOG_DATABASE_PATH` | 标准服务目录开关与 SQLite 文件，容器路径 `/data/olixops.db` |
 | `CATALOG_GATEWAY_*` / `CATALOG_PORT_START` / `CATALOG_PORT_END` | 固定共享 Higress 入口与端口池 |
 
-例如，仅在本机测试 MCP 写能力：
+例如，仅在 standalone 本机测试 MCP 写能力：
 
 ```bash
+APP_MODE=standalone \
 MCP_WRITE_ENABLED=true \
 KUBERNETES_WRITE_ENABLED=true \
 go run ./cmd
@@ -495,7 +500,7 @@ REST 遵循项目约定：查询使用 GET，带参数操作使用 POST，不使
 旧兼容模式的 MCP 地址为（认证版为 `/api/v1/mcp`，需要 Bearer JWT/PAT）：
 
 ```text
-http://127.0.0.1:8091/api/v1/pub/mcp
+http://127.0.0.1:8901/api/v1/pub/mcp
 ```
 
 采用官方 Go SDK 的 stateless Streamable HTTP 和 JSON-RPC。MCP 不使用 REST 的 `code/msg/data` 包装；工具失败通过 MCP 的错误结果返回。请求体上限 4 MiB，读工具默认 30 秒超时，写工具使用 `kubernetes.command-timeout-seconds`。
@@ -591,7 +596,7 @@ git diff --check
 
 下一步采用 **上层按 clusterId 路由多个单集群 k8s-ctl 实例**：上层统一提供 MCP/HTTP，先读取实例地址配置，再通过内部 HTTP 调用单集群 k8s-ctl；文件采用平台流式转发，后续对接既有集群信息项目。设计与当前差距见 [多集群路由设计](docs/multi-cluster-routing-design.md)，实施清单见 [开发待办](docs/roadmap.md)。当前仍未实现多集群路由。
 
-1. 按 [认证接入说明](docs/authentication.md) 准备签名密钥、启用 JWT/PAT、迁移 MCP URL，并完成公司 JWT/网关联调；认证模式下读写业务请求均需有效身份。
+1. 按 [认证接入说明](docs/authentication.md) 准备公司 JWT 公钥和独立 PAT 公钥，启用 JWT/PAT、迁移 MCP URL，并完成公司 JWT/网关联调；认证模式下读写业务请求均需有效身份。
 2. 实现默认拒绝的 `Authorizer`：按 cluster、action、Namespace、GVK、name 和内容策略授权。
 3. 明确 YAML apply 的字段权限，避免通过 manifest 间接绕过扩缩容、重启和 ConfigMap 策略。
 4. 增加 Helm 来源/版本摘要绑定、实际提交对象复核、并发锁和单独的高风险审批。
@@ -671,8 +676,8 @@ git diff --check
 
 ## 开发人员 MCP 诊断入口
 
-重启服务并导入 Codex 进行手动测试，请先看 [MCP 接入与手动测试](docs/mcp-manual-testing.md)：包含本地 managed 配置、集群 sidecar 差异、PAT 签发、Codex 导入、日志/配置/内存调用及拒绝测试。当前默认配置尚未启用认证和 Pod exec，仅重启默认配置不会自动开启诊断能力。
+重启服务并导入 Codex 进行手动测试，请先看 [MCP 接入与手动测试](docs/mcp-manual-testing.md)：包含本地 managed 配置、集群 sidecar 差异、平台 PAT 准备、Codex 导入、日志/配置/内存调用及拒绝测试。当前默认配置尚未启用认证和 Pod exec，仅重启默认配置不会自动开启诊断能力。
 
 面向没有 Kubernetes 凭据的开发人员，可部署专用 `mcp.diagnostics-only=true` 实例：只提供 `get_pod_logs` 和 `exec_pod_command`，隐藏管理 REST/MCP，并停用目录后台清理。管理员按可信用户 ID、Namespace、Pod UID、容器、动作及文件逐项授权；未匹配默认拒绝。客户端只需 PAT/公司 JWT，不需要 kubeconfig、SSH 或 kubectl。
 
-受控动作新增环境变量、配置文本读取、cgroup 内存、进程枚举及 PID 状态；沿用上游 Kubernetes MCP Server 的执行能力，不开放任意 shell。文件读取拒绝逐级符号链接和非普通文件，要求目标已有 Perl/Fcntl。集群中使用原 sidecar；本地可使用同一 Provider 快照驱动的 managed stdio 模式进行真实 MCP 联调。详见 [开发人员诊断说明](docs/developer-diagnostics.md) 与 [配置示例](configs/config.diagnostics.example.yaml)。
+受控动作新增环境变量、配置文本读取、cgroup 内存、进程枚举及 PID 状态；沿用上游 Kubernetes MCP Server 的执行能力，不开放任意 shell。文件读取拒绝逐级符号链接和非普通文件，要求目标已有 Perl/Fcntl。集群中使用原 sidecar；本地可使用同一 Provider 快照驱动的 managed stdio 模式进行真实 MCP 联调。详见 [开发人员诊断说明](docs/developer-diagnostics.md) 与 [统一配置](configs/config.yaml)。

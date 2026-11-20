@@ -1,0 +1,57 @@
+service:
+  configmaps:
+    - containerFileName: config.yaml
+      containerPath: /app/configs
+      fileContent: >
+        app:
+          mode: operator
+          name: k8s-ctl
+          version: 0.2.0
+        operator:
+          max-clusters: 16
+        server:
+          host: 0.0.0.0
+          port: 8901
+          mode: release
+        auth:
+          enabled: true
+          jwt:
+            enabled: true
+            public-key: ""
+            issuer: ""
+            audience: ""
+            key-id: ""
+          pat:
+            enabled: true
+        kubernetes:
+          write-enabled: true
+        pod-exec:
+          authorization-enabled: false
+          enabled: true
+          mode: managed
+          binary: /usr/local/bin/kubernetes-mcp-server
+        shell:
+          enabled: true
+          terminal:
+            max-sessions: 128
+            max-per-user: 16
+            idle-seconds: 900
+            lifetime-seconds: 3600
+      fileType: raw
+      name: config
+      readOnly: true
+  image:
+    ports:
+      - exposePort: 8901
+        port: 8901
+    repository: harbor.gtjaqh.net/lucy-dev/k8s-ctl-operator
+    tag: 0.0.1-alpha.10
+  name: k8s-ctl-operator
+  replicas: 1
+  resources:
+    limits:
+      cpu: "2"
+      memory: 1Gi
+    requests:
+      cpu: 100m
+      memory: 256Mi

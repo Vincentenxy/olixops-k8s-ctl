@@ -9,10 +9,10 @@
 ## 启动与入口开关
 
 ```bash
-go run ./cmd --config-dir ./configs
+go run ./cmd
 ```
 
-配置示例：[独立使用](../configs/config.standalone.example.yaml)、[上层操作器](../configs/config.operator.example.yaml)。复制所选示例为部署目录中的 config.yaml，按实际环境填写公钥挂载路径、issuer/audience 与需要保留的 grants。示例不含真实凭据，填写后才可运行。
+配置统一使用 [config.yaml](../configs/config.yaml)，字段说明和可复制模板见 [config.example.yaml](../configs/config.example.yaml)。将 `app.mode` 设为 `operator` 或 `standalone`，按实际环境填写公钥、issuer、audience 与 grants。模板不含真实凭据，复制为 `config.yaml` 后再运行。
 
 | 配置 | 含义 |
 | --- | --- |
@@ -27,14 +27,14 @@ go run ./cmd --config-dir ./configs
 
 关闭普通 HTTP、只连接主 MCP 时，文件工具依赖的上传下载数据流路由仍然可用。主 MCP 与内部 Kubernetes MCP 执行 sidecar/managed 是两项不同能力：关闭主 MCP 不会移除单次 exec 的内部执行依赖。
 
-认证要求沿用现有规则：推荐 JWT/PAT；旧 API key 模式兼容原有 HTTP 使用方。操作器的个人身份必须来自已验证的 JWT，不能只传 X-User-Id。上层个人 PAT 不会自动被独立下层 PAT 数据库认可；上层可验证 PAT 后签发下层信任的短期 JWT。下层不提供令牌交换服务。
+认证要求沿用现有规则：推荐 JWT/PAT；旧 API key 模式只适用于独立兼容入口。公司 JWT 和平台 PAT 分别使用 `auth.jwt.public-key` 与 `auth.pat.public-key` 验签，操作器不连接 Setting Redis。操作器的个人身份必须来自已验证的 JWT 或 PAT，不能只传 X-User-Id。Publish 与操作器之间透传当前调用者的同一个 Bearer Token，不签发内部 JWT，也不提供令牌交换服务。
 
 ## 查询与资源操作
 
 以下 curl 用环境变量代指调用者已持有的令牌，不要求服务端使用环境变量配置。不要把真实 token 写入文档、仓库或 URL。
 
 ```bash
-# Base 可为 http://127.0.0.1:8091，或 https://operator.example/k8sctl。
+# Base 可为 http://127.0.0.1:8901，或 https://operator.example/k8sctl。
 curl --fail-with-body "$K8S_CTL_BASE/api/v1/operator/capabilities" \
   -H "Authorization: Bearer $K8S_CTL_PAT"
 

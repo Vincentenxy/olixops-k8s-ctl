@@ -125,7 +125,7 @@ internal/interfaces/router/      入口开关、认证、资源路由装配
 
 实例增加稳定 cluster.id（与 catalog.cluster 来源统一）和每次启动变化的 runtimeId；能力接口从实际启用状态产生，不返回凭据/内部连接配置。业务请求不增加下层切换集群参数；上层核对实例身份后路由。客户端请求中的 userId 或任意 X-User-Id 不能覆盖认证用户。
 
-操作器首期支持使用现有受信 JWT 方式接入并验证 issuer/audience/UserID。上层个人 PAT 校验与短期内部 JWT 签发在上层实现；本项目不新建令牌交换服务，也不假设不同实例共享 PAT 数据库。用测试签发方模拟上层身份验证链。
+操作器现已支持使用当前调用者的 JWT/PAT 接入并验证 issuer/audience/UserID。Publish 完成上层个人 PAT 校验后透传同一 Bearer Token，操作器使用独立的 PAT 公钥本地验签，不连接 Setting Redis；本项目不新建令牌交换服务、内部 JWT 签发器或独立 PAT 数据库。公司 JWT 和平台 PAT 的公钥、issuer、audience、key-id 分别配置。
 
 AGENTS.md 现有“任意命令仅主 MCP 入口”的文字需在实施时按本次授权更新为“显式启用的认证 HTTP/MCP Shell 共享入口”，同时保留独立拦截器与目标限制。当前计划阶段不改规范或解除检查。
 

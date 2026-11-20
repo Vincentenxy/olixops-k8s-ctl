@@ -6,7 +6,7 @@
 
 上层唯一开发目录为 `/Users/vincent/IdeaProjects/efficient-platform/publish-devops-api`，采用 Boot 4 / Spring AI 2。旧 `Desktop/codes.nosync/tmp-code/publish-devops-api` 只作历史迁移参考，不再修改。
 
-下层目录为当前 k8s-ctl 项目。原 `cmd/main.go` 独立使用方式保留；新增 `cmd/operator` 为平台托管入口。在本机或管理网络部署一个操作器，不要求在业务集群部署 k8s-ctl。
+下层目录为当前 k8s-ctl 项目。统一 `cmd/main.go` 根据 `app.mode` 选择独立使用方式或平台托管入口。在本机或管理网络部署一个操作器，不要求在业务集群部署 k8s-ctl。
 
 ```mermaid
 flowchart LR
@@ -14,8 +14,8 @@ flowchart LR
     P --> S[服务 ID + 环境解析与既有授权]
     S --> D[(cluster_info 加密 kubeconfig)]
     S --> V[EnvVault 当前用户凭据解密]
-    V -->|控制凭据：注册自包含 kubeconfig| O[本地 k8s-ctl operator]
-    S -->|短期用户 JWT + clusterId| O
+    V -->|当前用户 JWT / PAT：注册自包含 kubeconfig| O[本地 k8s-ctl operator]
+    S -->|当前调用者 JWT/PAT + clusterId| O
     O --> R1[集群 A 独立 Provider / Service / 终端 Manager]
     O --> R2[集群 B 独立 Provider / Service / 终端 Manager]
     R1 --> K1[Kubernetes A]
@@ -26,12 +26,12 @@ flowchart LR
 
 ## 两类内部请求
 
-1. `POST /api/v1/operator/clusters/configure`：可信平台注册配置，使用独立控制凭据 `Authorization: Bearer ...`。输入为 `clusterId`、`kubeconfig`；旧 `allowedNamespaces` 仅兼容接收并忽略。只返回集群标识，不返回凭据
-2. `/clusters/{clusterId}/api/v1/...`：使用现有认证 HTTP 契约，JWT audience 固定为 `k8s-ctl:<clusterId>`，保留真实 UserID。普通用户 JWT 无权调用注册入口，控制凭据也不能代替用户 JWT 操作资源
+1. `POST /api/v1/operator/clusters/configure`：Publish 先完成服务和环境权限检查，再使用当前调用者 JWT/PAT 注册配置。输入为 `clusterId`、`kubeconfig`；旧 `allowedNamespaces` 仅兼容接收并忽略。只返回集群标识，不返回凭据
+2. `/clusters/{clusterId}/api/v1/...`：使用同一认证 HTTP 契约，保留真实 UserID。业务资源权限由 Publish 检查，k8s-ctl 负责 Token 有效性、目标隔离和运行实例校验
 
 健康检查为 `GET /api/v1/pub/health`。默认监听回环地址；跨主机传递 kubeconfig 必须经受控 HTTPS。不可把注册入口直接公开给开发者。
 
-配置相同的重复注册复用原 runtimeId 和终端。配置变化时创建新运行实例；旧请求执行完毕后释放旧终端管理器。不同集群分别构造 client-go、kubectl/Helm Runner、上游私有 MCP 执行器、终端 Manager 和文件引用状态。集群目录上限由 `--max-clusters` 配置，默认 16；终端上限按各集群配置，示例为 128/每用户 16，仍受现有校验范围限制。
+配置相同的重复注册复用原 runtimeId 和终端。配置变化时创建新运行实例；旧请求执行完毕后释放旧终端管理器。不同集群分别构造 client-go、kubectl/Helm Runner、上游私有 MCP 执行器、终端 Manager 和文件引用状态。集群目录上限由 `operator.max-clusters` 配置，默认 16；终端上限按各集群配置，示例为 128/每用户 16，仍受现有校验范围限制。
 
 注册请求最多 256 KiB；kubeconfig 最多 128 KiB，仅支持内嵌证书/密钥/token，拒绝外部 CA/证书文件、tokenFile、exec/auth-provider、代理 URL 和 impersonation，包括未选中的上下文。此限制不是文件传输大小限制。Provider 仅存内存；需要 CLI/上游时使用现有 0600 临时文件并清理，不将集群凭据写入数据库或日志。
 
@@ -58,13 +58,13 @@ publish 已有服务查询、Pod 状态和 install/upgrade/uninstall，本轮不
 
 ## 启动与配置
 
-复制 `configs/config.platform-operator.example.yaml` 为私有目录的 `config.yaml`，配置平台公钥文件、注册控制凭据文件和本机已安装的上游 v0.1.2 可执行程序：
+直接使用项目唯一配置文件 `configs/config.yaml`，将 `app.mode` 设为 `operator`。本地 GoLand 和容器部署都使用 `server.port: 8901`。同时配置平台 JWT/PAT 公钥和本机已安装的上游 v0.1.2 可执行程序：
 
 ```sh
-go run ./cmd/operator --config-dir /path/to/private/operator-config --max-clusters 16
+go run ./cmd
 ```
 
-publish 在私有 `.local/publish-k8sctl.yaml` 中配置 enabled、签名私钥文件、operator 地址/控制凭据文件，以及 clusterId -> base-url，不再维护 Namespace 名单。从 IDEA 父项目目录启动时，该文件放在父目录 `.local/` 下。上层配置示例及测试见上层 `docs/k8sctl-integration.md`。
+publish 在应用配置中配置 enabled 和 operator 地址，不再维护 Namespace 名单，也不再生成下层专用 JWT 或控制凭据。Publish 从当前请求上下文取得 JWT/PAT，并将同一个 Bearer Token 用于注册和业务请求。上层配置示例及测试见上层 `docs/k8sctl-integration.md`。
 
 发布库字段 `cluster_info.kubeconfig_ciphertext` 必须保存 EnvVault 密文。当前适配支持原始 kubeconfig YAML 和带 clusterId/group/env/kubeconfig 的旧 JSON 信封；JSON 信封必须与服务解析目标一致。Token 可从个人设置/Redis 读取，但必须与实际 EnvVault 的用户和 PAT 记录匹配。不能因解密失败而回退到本机默认 kubeconfig。
 

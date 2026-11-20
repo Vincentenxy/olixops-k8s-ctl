@@ -150,7 +150,7 @@ func TestHTTPExecAuthorizationSwitchWithoutPodLabel(t *testing.T) {
 				{"/files/prepare-upload", domain.UploadInput{TerminalTarget: target, Path: "/tmp/demo.txt"}},
 				{"/files/prepare-download", domain.DownloadInput{TerminalTarget: target, Path: "/tmp/demo.txt"}},
 			} {
-				status, result := operatorRequest(t, server.URL, f.company(t, nil, nil), "POST", "/api/v1/cluster/pods"+request.path, request.body)
+				status, result := operatorRequest(t, server.URL, f.jwt(t, nil, nil), "POST", "/api/v1/cluster/pods"+request.path, request.body)
 				if enabled {
 					require.Equal(t, 403, status, request.path)
 				} else {
@@ -186,7 +186,7 @@ func TestOperatorHTTPWithoutMainMCP(t *testing.T) {
 	require.NoError(t, e)
 	server := httptest.NewServer(engine)
 	defer server.Close()
-	token := f.company(t, nil, nil)
+	token := f.jwt(t, nil, nil)
 	call := func(path string, in any) (int, operatorEnvelope) {
 		return operatorRequest(t, server.URL, token, "POST", path, in)
 	}
@@ -199,7 +199,7 @@ func TestOperatorHTTPWithoutMainMCP(t *testing.T) {
 	require.Equal(t, 404, status)
 	status, _ = operatorRequest(t, server.URL, token, "GET", "/api/v1/cluster/namespaces", nil)
 	require.Equal(t, 200, status)
-	for _, badToken := range []string{"invalid", f.company(t, func(c jwt.MapClaims) { c["aud"] = "wrong" }, nil)} {
+	for _, badToken := range []string{"invalid", f.jwt(t, func(c jwt.MapClaims) { c["aud"] = "wrong" }, nil)} {
 		status, denied := operatorRequest(t, server.URL, badToken, "GET", "/api/v1/operator/capabilities", nil)
 		require.Equal(t, 401, status)
 		require.JSONEq(t, `{"reason":"unauthenticated"}`, string(denied.Data))
@@ -214,7 +214,7 @@ func TestOperatorHTTPWithoutMainMCP(t *testing.T) {
 	require.Equal(t, 200, status, string(opened.Data))
 	var term domain.TerminalResult
 	require.NoError(t, json.Unmarshal(opened.Data, &term))
-	other := f.company(t, func(c jwt.MapClaims) { c["staffuserid"] = "other" }, nil)
+	other := f.jwt(t, func(c jwt.MapClaims) { c["staffuserid"] = "other" }, nil)
 	status, _ = operatorRequest(t, server.URL, other, "POST", "/api/v1/cluster/pods/terminals/read", domain.TerminalReadInput{SessionID: term.SessionID})
 	require.Equal(t, 404, status)
 	status, _ = call("/api/v1/cluster/pods/terminals/write", domain.TerminalWriteInput{SessionID: term.SessionID, Input: "hello\n\x03"})
@@ -294,7 +294,7 @@ func TestHTTPMCPInputAndResultParity(t *testing.T) {
 	require.NoError(t, e)
 	server := httptest.NewServer(engine)
 	defer server.Close()
-	token := f.company(t, nil, nil)
+	token := f.jwt(t, nil, nil)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	client, e := sdk.NewClient(&sdk.Implementation{Name: "parity", Version: "1"}, nil).Connect(ctx, &sdk.StreamableClientTransport{Endpoint: server.URL + "/api/v1/mcp", HTTPClient: &http.Client{Transport: bearerTransport{token}}}, nil)
@@ -351,7 +351,7 @@ func TestAllToolsHaveHTTPRoutes(t *testing.T) {
 	defer server.Close()
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	session, e := sdk.NewClient(&sdk.Implementation{Name: "coverage", Version: "1"}, nil).Connect(ctx, &sdk.StreamableClientTransport{Endpoint: server.URL + "/api/v1/mcp", HTTPClient: &http.Client{Transport: bearerTransport{f.company(t, nil, nil)}}}, nil)
+	session, e := sdk.NewClient(&sdk.Implementation{Name: "coverage", Version: "1"}, nil).Connect(ctx, &sdk.StreamableClientTransport{Endpoint: server.URL + "/api/v1/mcp", HTTPClient: &http.Client{Transport: bearerTransport{f.jwt(t, nil, nil)}}}, nil)
 	require.NoError(t, e)
 	defer session.Close()
 	all := map[string]bool{}
@@ -440,7 +440,7 @@ func TestOperatorProxyDownloadCancellation(t *testing.T) {
 	proxy.FlushInterval = -1
 	upper := httptest.NewServer(proxy)
 	defer upper.Close()
-	token := f.company(t, nil, nil)
+	token := f.jwt(t, nil, nil)
 	status, prepared := operatorRequest(t, upper.URL, token, "POST", "/api/v1/cluster/pods/files/prepare-download", domain.DownloadInput{TerminalTarget: domain.TerminalTarget{Namespace: "demo", Pod: "app", Container: "app"}, Path: "/tmp/large.bin"})
 	require.Equal(t, 200, status)
 	var ticket domain.DownloadOutput

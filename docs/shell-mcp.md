@@ -24,7 +24,7 @@ mcp:
 
 还需开启 `auth.enabled`、`kubernetes.write-enabled`、`pod-exec.enabled`，并准备上游执行组件。这里的功能开关默认关闭；allow-all 是内容策略占位实现，尚无危险命令保护。
 
-本地使用 `pod-exec.mode: managed` 和官方 v0.1.2 二进制；集群使用 `mode: sidecar` 和 in-cluster，同原有 [桥接部署](kubernetes-mcp-integration.md)。PAT 与 [认证接入说明](authentication.md) 相同。客户端 URL 不变：本地 `http://127.0.0.1:8091/api/v1/mcp`，Higress 下为 `/k8sctl/api/v1/mcp`。重新连接即可发现更新后的参数。
+本地使用 `pod-exec.mode: managed` 和官方 v0.1.2 二进制；集群使用 `mode: sidecar` 和 in-cluster，同原有 [桥接部署](kubernetes-mcp-integration.md)。PAT 与 [认证接入说明](authentication.md) 相同。客户端 URL 不变：本地 `http://127.0.0.1:8901/api/v1/mcp`，Higress 下为 `/k8sctl/api/v1/mcp`。重新连接即可发现更新后的参数。
 
 这是完整管理 MCP，不应继续使用 `diagnostics-only: true`。该组合在启动时拒绝。完整管理工具的通用资源级授权仍有待实现，不能把原诊断专用模式的用户隔离承诺套用到全部管理工具。
 
@@ -138,7 +138,7 @@ shell:
 ```json
 {
   "downloadId": "REPLACE_WITH_RETURNED_ID",
-  "downloadUrl": "http://127.0.0.1:8091/api/v1/cluster/pods/files/download",
+  "downloadUrl": "http://127.0.0.1:8901/api/v1/cluster/pods/files/download",
   "method": "POST",
   "name": "env-vault",
   "expiresAt": "2026-11-06T10:05:00Z",
@@ -158,7 +158,7 @@ curl --fail --show-error \
   --header 'Content-Type: application/json' \
   --data '{"downloadId":"REPLACE_WITH_RETURNED_ID"}' \
   --output ./env-vault-linux.bin.part \
-  'http://127.0.0.1:8091/api/v1/cluster/pods/files/download' \
+  'http://127.0.0.1:8901/api/v1/cluster/pods/files/download' \
   && mv ./env-vault-linux.bin.part ./env-vault-linux.bin
 ```
 
@@ -181,7 +181,7 @@ server:
 
 ```bash
 go run ./cmd/mcp-download \
-  --url http://127.0.0.1:8091/api/v1/mcp \
+  --url http://127.0.0.1:8901/api/v1/mcp \
   --namespace env-vault \
   --pod env-vault-2 \
   --container env-vault \
@@ -209,7 +209,7 @@ curl --fail --show-error \
   --header 'Content-Type: application/octet-stream' \
   --header 'X-Upload-Id: REPLACE_WITH_RETURNED_ID' \
   --data-binary @./local-config.yaml \
-  'http://127.0.0.1:8091/api/v1/cluster/pods/files/upload'
+  'http://127.0.0.1:8901/api/v1/cluster/pods/files/upload'
 ```
 
 上传接口为 `POST /api/v1/cluster/pods/files/upload`。URL 使用工具返回值，经过 Higress 时含 `/k8sctl` 前缀；与下载复用 `server.public-url`。本地文件名不传给服务端，目标路径只能来自已认证 MCP 准备阶段，不能用 HTTP header 临时换目标。成功响应沿用统一 JSON envelope：

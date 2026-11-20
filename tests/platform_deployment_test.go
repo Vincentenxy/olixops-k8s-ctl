@@ -23,7 +23,7 @@ func TestPlatformDeploymentConfigurations(t *testing.T) {
 			require.NoError(t, err)
 			require.True(t, cfg.HTTPEnabled())
 			require.True(t, cfg.Auth.Enabled)
-			require.True(t, cfg.Auth.Company.Enabled)
+			require.True(t, cfg.Auth.JWT.Enabled)
 			require.False(t, cfg.Auth.PAT.Enabled)
 			require.False(t, cfg.MCP.Enabled, "platform calls HTTP; private exec sidecar is independent")
 			require.False(t, cfg.MCP.DiagnosticsOnly)
@@ -31,7 +31,7 @@ func TestPlatformDeploymentConfigurations(t *testing.T) {
 			require.True(t, cfg.Kubernetes.WriteEnabled)
 			require.Equal(t, "", cfg.Kubernetes.Kubeconfig.Path)
 			require.Equal(t, cfg.ClusterID(), cfg.Catalog.Cluster)
-			require.Equal(t, "k8s-ctl:"+cfg.ClusterID(), cfg.Auth.Company.Audience)
+			require.Empty(t, cfg.Auth.JWT.Audience, "platform JWT audience is configured from the actual platform contract")
 			require.Empty(t, cfg.PodExec.Grants)
 			full := profile == "full"
 			require.Equal(t, full, cfg.PodExec.Enabled)
@@ -107,7 +107,7 @@ func TestPlatformDeploymentContracts(t *testing.T) {
 			}
 			ports, _, _ := unstructured.NestedSlice(service.Object, "spec", "ports")
 			require.Len(t, ports, 1, "private MCP sidecar must not be exposed")
-			require.EqualValues(t, 8091, ports[0].(map[string]any)["port"])
+			require.EqualValues(t, 8901, ports[0].(map[string]any)["port"])
 			containers := pod["containers"].([]any)
 			require.Equal(t, profile == "full", len(containers) == 2)
 			_, hasPVC := objects["PersistentVolumeClaim/"+name+"-data"]

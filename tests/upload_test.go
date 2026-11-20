@@ -160,7 +160,7 @@ func TestUploadThroughMainMCP(t *testing.T) {
 	defer server.Close()
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
-	token := f.company(t, nil, nil)
+	token := f.jwt(t, nil, nil)
 	session, err := sdk.NewClient(&sdk.Implementation{Name: "upload-test", Version: "1"}, nil).Connect(ctx, &sdk.StreamableClientTransport{Endpoint: server.URL + "/api/v1/mcp", HTTPClient: &http.Client{Transport: bearerTransport{token}}}, nil)
 	require.NoError(t, err)
 	defer session.Close()
@@ -222,7 +222,7 @@ func TestUploadThroughMainMCP(t *testing.T) {
 	require.Equal(t, 400, unknownResponse.StatusCode)
 
 	require.Equal(t, 401, send(ticket, "", data, ""))
-	require.Equal(t, 404, send(ticket, f.company(t, func(c jwt.MapClaims) { c["staffuserid"] = "other" }, nil), data, ""))
+	require.Equal(t, 404, send(ticket, f.jwt(t, func(c jwt.MapClaims) { c["staffuserid"] = "other" }, nil), data, ""))
 	require.Equal(t, 400, send(ticket, token, data, "bytes 0-1/2"))
 	require.Equal(t, 200, send(ticket, token, data, ""))
 	require.Equal(t, 404, send(ticket, token, data, ""))

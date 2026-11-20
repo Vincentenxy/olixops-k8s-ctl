@@ -5,6 +5,7 @@ import (
 	"net"
 	"net/url"
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 
@@ -15,6 +16,7 @@ import (
 )
 
 type Config struct {
+	Operator   OperatorConfig   `mapstructure:"operator"`
 	HTTP       HTTPConfig       `mapstructure:"http"`
 	Cluster    ClusterConfig    `mapstructure:"cluster"`
 	Shell      ShellConfig      `mapstructure:"shell"`
@@ -34,6 +36,10 @@ type HTTPConfig struct {
 }
 type ClusterConfig struct {
 	ID string `mapstructure:"id"`
+}
+
+type OperatorConfig struct {
+	MaxClusters int `mapstructure:"max-clusters"`
 }
 
 func (c *Config) HTTPEnabled() bool { return c.HTTP.Enabled == nil || *c.HTTP.Enabled }
@@ -165,9 +171,15 @@ type ServerConfig struct {
 }
 
 type AppConfig struct {
+	Mode    string `mapstructure:"mode"`
 	Name    string `mapstructure:"name"`
 	Version string `mapstructure:"version"`
 }
+
+const (
+	ModeStandalone = "standalone"
+	ModeOperator   = "operator"
+)
 
 type KubernetesConfig struct {
 	InCluster    bool             `mapstructure:"in-cluster"`
@@ -194,12 +206,14 @@ type ControlConfig struct {
 
 func Load(path string) (*Config, error) {
 	v := viper.New()
-	v.SetConfigName("config")
-	v.SetConfigType("yaml")
-	v.AddConfigPath(path)
+	// The runtime contract has one configuration file. Resolve it explicitly so
+	// stale mode-specific files in the same directory cannot be selected.
+	v.SetConfigFile(filepath.Join(path, "config.yaml"))
 	v.SetEnvKeyReplacer(strings.NewReplacer("SHELL", "K8S_CTL_SHELL", ".", "_", "-", "_"))
 	v.AutomaticEnv()
 	v.SetDefault("http.enabled", true)
+	v.SetDefault("app.mode", ModeStandalone)
+	v.SetDefault("operator.max-clusters", 16)
 	v.SetDefault("cluster.id", "")
 	v.SetDefault("server.public-url", "")
 	v.SetDefault("control.api-key-file", "")
@@ -215,11 +229,14 @@ func Load(path string) (*Config, error) {
 	v.SetDefault("pod-exec.mode", "sidecar")
 	v.SetDefault("pod-exec.binary", "kubernetes-mcp-server")
 	v.SetDefault("pod-exec.grants", []domain.DiagnosticGrant{})
+	v.SetDefault("mcp.enabled", false)
+	v.SetDefault("mcp.write-enabled", false)
 	v.SetDefault("mcp.diagnostics-only", false)
 	v.SetDefault("pod-exec.endpoint", "http://127.0.0.1:8082/mcp")
 	for key, value := range map[string]any{
-		"auth.enabled": false, "auth.company.enabled": false, "auth.company.issuer": "", "auth.company.audience": "", "auth.company.key-id": "", "auth.company.public-key": "", "auth.company.public-key-file": "",
-		"auth.pat.enabled": false, "auth.pat.issuer": "k8s-ctl", "auth.pat.audience": "k8s-ctl", "auth.pat.key-id": "pat-v1", "auth.pat.private-key-file": "", "auth.pat.public-key-file": "", "auth.pat.database-path": "./data/auth.db",
+		"auth.enabled":     false,
+		"auth.jwt.enabled": false, "auth.jwt.public-key": "", "auth.jwt.issuer": "", "auth.jwt.audience": "", "auth.jwt.key-id": "",
+		"auth.pat.enabled": false,
 	} {
 		v.SetDefault(key, value)
 	}
@@ -238,6 +255,10 @@ func Load(path string) (*Config, error) {
 
 	if err := v.ReadInConfig(); err != nil {
 		return nil, fmt.Errorf("read config file: %w", err)
+	}
+
+	if v.IsSet("auth.company") || v.IsSet("auth.pat.private-key-file") || v.IsSet("auth.pat.database-path") || v.IsSet("redis.addr") || v.IsSet("redis.sentinel") {
+		return nil, fmt.Errorf("legacy authentication configuration: use auth.jwt and platform auth.pat public-key validation; see configs/config.yaml")
 	}
 
 	var cfg Config
@@ -272,6 +293,12 @@ func Load(path string) (*Config, error) {
 	}
 	if cfg.Server.Mode == "" {
 		cfg.Server.Mode = "debug"
+	}
+	if cfg.App.Mode != ModeStandalone && cfg.App.Mode != ModeOperator {
+		return nil, fmt.Errorf("app.mode must be standalone or operator")
+	}
+	if cfg.Operator.MaxClusters < 1 {
+		return nil, fmt.Errorf("operator.max-clusters must be positive")
 	}
 	if !cfg.Auth.Enabled && cfg.Control.APIKeyFile != "" {
 		if cfg.Control.APIKey != "" {

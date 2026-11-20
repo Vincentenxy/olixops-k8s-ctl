@@ -1,0 +1,130 @@
+# k8s-ctl 唯一配置示例
+#
+# 运行时只读取 config.yaml：
+#   cp configs/config.example.yaml configs/config.yaml
+#   go run ./cmd
+#
+# app.mode 决定同一个程序使用哪种集群连接方式：
+#   operator   给 Publish 使用；Publish 注册 kubeconfig，k8s-ctl 按 clusterId 创建运行实例
+#   standalone 独立使用；k8s-ctl 直接读取本机 kubeconfig 或 Pod ServiceAccount
+#
+# 两种模式共用 server.host/server.port。当前端口约定为 8901。
+# 环境变量优先级高于 YAML，例如 AUTH_PAT_PUBLIC_KEY、POD_EXEC_BINARY。
+# 公钥、Token、kubeconfig 和私钥不要写入示例或提交到仓库。
+
+app:
+  # 必填：Publish 调用时使用 operator；独立固定集群时改为 standalone
+  mode: operator
+  # 用于启动日志和健康检查
+  name: olixops-k8s-ctl
+  version: 0.2.0
+
+operator:
+  # 仅 operator 使用：同时保留的动态集群数量上限
+  max-clusters: 16
+
+server:
+  # 本地回环；容器或 Kubernetes Service 应改为 0.0.0.0
+  host: 127.0.0.1
+  # operator 和 standalone 共用，不随模式切换
+  port: 8901
+  # 文件传输地址。只在启用文件上传/下载时使用；公网部署必须填 HTTPS 地址
+  public-url: ""
+  # debug、release 或 test
+  mode: debug
+
+http:
+  # 普通 REST 接口开关，包含资源查询、日志和操作接口；健康检查不受此开关影响
+  enabled: true
+
+cluster:
+  # 仅 standalone 使用的固定集群 ID；operator 的真实 ID 来自 Publish 注册请求
+  id: platform-operator
+
+auth:
+  # operator 必须开启；standalone 可使用 JWT/PAT 或旧 control API key
+  enabled: true
+  jwt:
+    # 公司统一 JWT。启用后填写对应公钥、issuer、audience
+    enabled: true
+    public-key: ""
+    issuer: ""
+    audience: ""
+    key-id: ""
+  pat:
+    # 平台 PAT。与 JWT 使用完全分离的公钥
+    enabled: true
+    public-key: ""
+    issuer: efficient-platform
+    audience: platform-api
+    key-id: platform-pat-v1
+
+control:
+  # 仅 auth.enabled=false 的 standalone 兼容模式使用
+  api-key: ""
+  api-key-file: ""
+
+kubernetes:
+  # standalone 使用：true 表示使用当前 Pod ServiceAccount
+  # operator 忽略本地 kubeconfig，使用 Publish 注册的内存 kubeconfig
+  in-cluster: false
+  # Kubernetes 写操作总开关；Shell、终端、文件上传也依赖它
+  write-enabled: true
+  command-timeout-seconds: 120
+  kubectl: kubectl
+  helm: helm
+  kubeconfig:
+    # 仅 standalone 使用：file 或 in-cluster
+    source: file
+    path: ""
+    reference: ""
+    context: ""
+
+# 可选能力：默认关闭时，operator 仍可提供资源查询和 Pod 日志。
+# 只有需要以下能力时才配置并开启：
+# - pod-exec：执行容器命令的底层 MCP bridge
+# - shell.enabled：单次 Shell、持续终端和文件上传/下载
+# operator 只允许 pod-exec.mode=managed；standalone 还可使用 sidecar。
+#
+# pod-exec:
+#   authorization-enabled: true
+#   enabled: true
+#   mode: managed
+#   # 必须是本机/镜像内存在且版本为 v0.1.2 的 kubernetes-mcp-server
+#   binary: /usr/local/bin/kubernetes-mcp-server
+#   endpoint: http://127.0.0.1:8082/mcp
+#   grants: []
+#
+# shell:
+#   enabled: true
+#   interceptor:
+#     enabled: true
+#     provider: allow-all
+#   terminal:
+#     idle-seconds: 300
+#     lifetime-seconds: 1800
+#     max-sessions: 16
+#     max-per-user: 4
+
+mcp:
+  # k8s-ctl 自己的 MCP 入口。Publish operator 通常关闭，由 Publish 对外提供 MCP
+  enabled: false
+  # 仅 mcp.enabled=true 且需要写工具时开启
+  write-enabled: false
+  # 仅旧的精确诊断场景使用；operator 不允许开启
+  diagnostics-only: false
+
+catalog:
+  # 仅 standalone 标准服务目录使用；operator 必须关闭
+  enabled: false
+  database-path: ./data/olixops.db
+  cluster: platform-operator
+  default-owner: platform
+  default-storage-class: local-path
+  sandbox-runtime-class: ""
+  gateway-id: higress
+  gateway-namespace: higress-system
+  gateway-service: higress-gateway
+  gateway-name: higress-tcp-gateway
+  port-start: 30000
+  port-end: 30200

@@ -80,7 +80,7 @@ flowchart TB
 | 状态 | 位置 | 生命周期与注意点 |
 | --- | --- | --- |
 | 标准模板、实例配置修订、部署、端口及事件 | Catalog SQLite，路径由 `catalog.database-path` 配置 | 需要持久化；不是 Kubernetes 的完整备份 |
-| PAT 状态、摘要、有效期、撤销记录 | PAT SQLite，路径由 `auth.pat.database-path` 配置 | 仅有验签公钥不能替代本地 PAT 数据库；升级需保留数据库及签名密钥 |
+| PAT 状态、摘要、有效期、撤销记录 | 平台 Setting 的 Redis，使用 `userPersonalToken:<tokenId>` | 操作器不签发 PAT，不保存独立 PAT 数据库；Redis 不可用时认证返回依赖不可用 |
 | 实际工作负载、数据卷和网关路由 | Kubernetes / PVC | 删除服务与删除持久数据不是同一操作；目录删除默认保留数据库 PVC |
 | 终端连接、输出缓冲、上传下载引用 | 当前进程内存 | 重启即失效；引用绑定用户与 Pod UID；不能直接分流到另一副本 |
 | 实例部署锁、共享入口协调锁 | 当前进程内存 | 不能支撑多个独立进程同时协调同一入口 |
@@ -101,7 +101,7 @@ flowchart TB
 | 日志与 Shell | Pod 日志、受控动作与显式开启的任意单次命令 | 无持续日志订阅；输出保留实际上游含义，不虚构退出码或独立 stdout/stderr |
 | 持续终端 | open/write/read/close、TTY、控制字符中断、输出游标、用户归属、过期和并发限制 | 通过请求轮询读取，不是 SSH 服务或现成 WebSocket 终端；重启失效 |
 | 文件 | 准备引用、认证 HTTP 下载/上传、单次消费、长度和 SHA-256 检查、暂存与清理 | 上传只创建新文件；无固定文件大小上限、断点续传和目录上传；网关仍可能限制大小/超时 |
-| JWT / PAT | 公司 RS256 JWT；个人 PAT 创建、列表、撤销、到期与数据库检查；离线初始 PAT | 不提供公司登录页；认证不代表资源归属权限已完成 |
+| JWT / PAT | 公司 RS256 JWT；个人 PAT 创建、列表、撤销、到期与 Setting 管理，Publish 检查状态，k8s-ctl 使用独立公钥验签 | 不提供公司登录页；认证不代表资源归属权限已完成 |
 | 配置目录 | SQLite 模板版本、实例、配置修订、预览、部署记录和访问验证 | 不是通用配置分发/订阅中心，ownerId 还不是强制授权依据 |
 | 标准服务 | Redis、PostgreSQL、MySQL、MongoDB、Milvus、Nginx、Python JupyterLab；沙箱 TTL 回收 | 七类流程有自动化覆盖，不等于七类都在当前集群完成真实验收 |
 | Higress 端口 | 默认 30000–30200，共 201 个；同步实际占用、预留/绑定/释放和事件 | 范围配置不证明 LB 已开放全部端口；先同步实际 Service/Gateway/TCPRoute |
@@ -143,7 +143,7 @@ HTTP 使用 `/api/v1/cluster/资源/操作`；Catalog 保留 `/templates`、`/se
 
 ### 5.1 当前身份模型
 
-公司 JWT 校验签名、issuer、audience、有效期等；用户 ID 从可信 claim 得到（优先 staffuserid，回退 sub），写入 context。个人 PAT 还要校验本实例数据库里的摘要、用户、到期和撤销状态。不得接受任意 `X-User-Id` 覆盖可信身份。
+公司 JWT 校验签名、issuer、audience、有效期等；用户 ID 从可信 `staffuserid` claim 得到，写入 context。个人 PAT 在 k8s-ctl 侧校验独立公钥签名和 claims，Setting/Publish 负责摘要、用户、到期和撤销状态。不得接受任意 `X-User-Id` 覆盖可信身份。
 
 现有 Namespace/资源范围、写开关、RBAC、诊断 grants、终端/文件用户绑定继续生效。目标 Pod 通常需 `k8s-ctl/exec-enabled: "true"` 标签，或满足已批准 UID 的校验分支，并接受宿主网络/进程空间等目标限制；具体以 [pod_exec.go](../internal/infrastructure/kubernetes/pod_exec.go) 为准。仅开 Shell 配置不代表任意 Pod 都可执行。不过通用 [DeferredAuthorizer](../internal/domain/authorization.go) 默认放行；[Shell interceptor](../internal/application/shell/interceptor/interceptor.go) 当前 AllowAll 也只是扩展占位。启用拦截器不等于已经识别危险命令。原始 YAML、日志与文件不增加自动脱敏，后续统一权限方案再处理。
 
@@ -182,7 +182,7 @@ flowchart LR
 
 上层负责集群目录、用户交互、统一 MCP、路由和跨实例引用映射；下层保留实际 Kubernetes 操作及业务边界。上层无需再连接每个下层主 MCP，也不需要集中读取各集群 kubeconfig。复用下层 HTTP，不做进程内插件化或在同一实例动态切换集群。
 
-上层调用时使用下层信任的 JWT 并保留真实 UserID，按集群设置并校验 audience。上层 PAT 不会自动被所有下层的 PAT 数据库认可；如需 PAT 到下层 JWT 转换，应由上层验证并签发受信短期 JWT，当前下层没有令牌交换服务。
+上层调用时透传当前用户的 JWT 或 PAT。操作器使用 `auth.jwt.public-key` 验证公司 JWT，使用 `auth.pat.public-key` 验证平台 PAT。Publish 不为下层签发内部 JWT，操作器不提供令牌交换服务，也不连接 Setting Redis。
 
 通过 `/api/v1/operator/capabilities` 核对 clusterId、runtimeId、版本及实际开关。runtimeId 是每次启动的实例身份。终端/文件引用需在上层绑定 clusterId、backendId、runtimeId 和用户；后续请求必须回到原实例，不能因故障偷偷换集群。文件先采用上层流式代理，保留长度与取消语义。详细方案见 [多集群路由设计](multi-cluster-routing-design.md)。
 
@@ -207,24 +207,15 @@ flowchart LR
 
 ### 8.1 独立启动
 
-前置：Go 按 go.mod；测试使用模拟后端，不需要真实 kubeconfig。实际服务需要可用 Provider；启用相关能力时准备 kubectl、Helm 及内部 Kubernetes MCP Server。下面操作使用独立配置目录，避免覆盖已有开发配置。
+前置：Go 按 go.mod；测试使用模拟后端，不需要真实 kubeconfig。实际服务需要可用 Provider；启用相关能力时准备 kubectl、Helm 及内部 Kubernetes MCP Server。当前项目只使用 `configs/config.yaml` 这一份系统配置，GoLand 和容器均从该配置选择运行模式。
 
 ```bash
-mkdir -p .local/handover
-cp configs/config.standalone.example.yaml .local/handover/config.yaml
-# 编辑该配置：真实公私钥文件路径、PAT DB 路径、Namespace、grants、managed binary。
-# 本地用 file Provider；临时不要验证标准服务时保持 catalog.enabled=false。
-go run ./cmd --config-dir ./.local/handover
+# 编辑 configs/config.yaml：填写认证公钥、kubeconfig、Namespace、grants 和 managed binary。
+# Publish 联调使用 app.mode=operator；独立单集群使用 app.mode=standalone。
+go run ./cmd
 ```
 
-示例有占位路径，未填写不能直接启动。密钥准备详见 [认证说明](authentication.md)。`auth.enabled` 与 `auth.pat.enabled` 都启用后，管理员使用同一份配置、同一数据库和签名密钥签发首个 PAT：
-
-```bash
-go run ./cmd/pat --config-dir ./.local/handover \
-  --user-id '<真实用户ID>' --name handover-test --days 30
-```
-
-token 仅在创建时返回，放个人凭据工具，不写入 Git 或共享交接文档。服务不提供任意无认证 user-id 换 token 接口。
+示例有占位路径，未填写不能直接启动。密钥准备详见 [认证说明](authentication.md)。PAT 由平台 Setting 的个人令牌功能创建、撤销和管理，k8s-ctl 不接受 `user-id` 参数签发令牌。将本人 PAT 通过本地安全凭据注入调用客户端，不写入 Git 或共享交接文档。
 
 另一个终端中，`K8S_CTL_BASE` 与 `K8S_CTL_PAT` 仅代指调用者本地保存的地址和令牌，不要求服务端使用环境变量配置：
 
@@ -244,7 +235,7 @@ curl --fail-with-body "$K8S_CTL_BASE/api/v1/cluster/namespaces" \
 
 - 使用 InCluster Provider 与 ServiceAccount；配置合适 RBAC，不把开发人员 kubeconfig 分发给客户端。
 - ConfigMap 保存普通配置，Secret 挂载认证密钥及需要的 control key；仍引用 `olixops-control` 的旧配置必须先准备 Secret，否则 FailedMount。切换认证时同步检查旧挂载，不能只删除 Secret。
-- 保留单副本、SQLite 持久卷和 PAT 数据；变更配置/密钥需重启。原本机 SQLite 内容不会自动进入新的 PVC。
+- 保留单副本和 Catalog SQLite 持久卷；PAT 状态由平台 Setting 管理，k8s-ctl 不配置 Redis 连接。变更配置或公钥需重启，原本机 Catalog SQLite 内容不会自动进入新的 PVC。
 - Higress 将 `/k8sctl` 前缀剥离后转发到 `/api/v1/...`，服务内部路由不重复加前缀。public-url 使用用户实际可达的外部地址。
 - 操作器示例关闭主 MCP、启用认证 HTTP；完整单次 exec 仍须安装内部执行组件。不要把内部 sidecar 端口开放给开发人员。
 - 网关不自动重试写请求；文件代理检查请求体大小、长度、缓冲与超时。没有应用级文件大小上限不代表网关无限制。
@@ -286,7 +277,7 @@ HTTP/MCP 的身份、请求 ID、取消和超时沿 context 贯穿。日志统�
 | 主题 | 阅读入口 |
 | --- | --- |
 | 项目总览 / 功能清单 | [README](../README.md) |
-| HTTP 接入、curl 与开关 | [操作器指南](http-operator-guide.md)、[独立配置](../configs/config.standalone.example.yaml)、[操作器配置](../configs/config.operator.example.yaml) |
+| HTTP 接入、curl 与开关 | [操作器指南](http-operator-guide.md)、[统一配置](../configs/config.yaml) |
 | 工具与接口字段 | [覆盖矩阵](http-mcp-coverage.md)、[OpenAPI](http-openapi.json) |
 | Shell / 终端 / 文件 | [Shell 指南](shell-mcp.md)、[内部 MCP 集成](kubernetes-mcp-integration.md) |
 | 身份与后续权限 | [认证指南](authentication.md)、[授权设计](mcp-authorization-design.md)、[待办](roadmap.md) |

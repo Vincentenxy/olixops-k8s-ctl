@@ -23,7 +23,7 @@ platform/
 │   ├── config.yaml          JWT、clusterId、能力开关
 │   ├── namespace.yaml       控制器 Namespace 和隔离业务 Namespace
 │   ├── deployment.yaml     单副本、探针、公钥挂载
-│   ├── service.yaml         仅 ClusterIP :8091
+│   ├── service.yaml         仅 ClusterIP :8901
 │   ├── serviceaccount.yaml
 │   └── rbac/                discovery / workloads / namespaces / helm
 ├── full/                    完整入口，替换配置并添加两个组件
@@ -55,11 +55,11 @@ platform/
 3. 默认控制器 Namespace 是 **`olixops-platform`**，业务 Namespace 是 **`developer-demo`**。独立 Namespace 避免旧 Service 的 `app` 选择器选中新控制器。更换控制器 Namespace 时同步清单、RoleBinding subjects、ConfigMap generator、Secret 准备脚本和 `server.public-url`；不要在根 Kustomization 随意加 `namespace` 字段，它会把业务及 Higress 的 RoleBinding 也迁移。
 4. 增加业务 Namespace 时，按部署需求准备 Namespace 清单、workloads/helm RoleBinding 和 Namespace metadata `resourceNames`；开启 Shell 需准备 exec Role/RoleBinding。应用不再维护 Namespace 名单，旧 allowed-namespaces 字段不生效；本部署包的 Kubernetes RBAC 示例仍仅授权示例 Namespace，按需扩展，不自动扩大集群授权。
 5. 完整入口核对已有 Higress Service/Gateway 名称、Gateway API/TCPRoute CRD、端口池 30000–30200、模板 PVC 的 StorageClass `local-path`。SQLite PVC 默认 StorageClass 与模板使用的 `catalog.default-storage-class` 是两项配置。使用 Catalog 时 `higress-system` 也必须在 Kubernetes allowlist，但不放入 exec allowlist。
-6. 确认上层能访问 ClusterIP/DNS，或配置内网代理；上层后端地址可配置为 `http://olixops-k8s-ctl-platform.olixops-platform.svc.cluster.local:8091`。控制器 `server.public-url` 默认留空，文件接口返回相对路径；该配置不接受集群内 HTTP 地址，如需绝对 URL，使用实际 HTTPS 地址。没有公网 Ingress、TLS 证书或平台网络打通步骤。
+6. 确认上层能访问 ClusterIP/DNS，或配置内网代理；上层后端地址可配置为 `http://olixops-k8s-ctl-platform.olixops-platform.svc.cluster.local:8901`。控制器 `server.public-url` 默认留空，文件接口返回相对路径；该配置不接受集群内 HTTP 地址，如需绝对 URL，使用实际 HTTPS 地址。没有公网 Ingress、TLS 证书或平台网络打通步骤。
 
 ## JWT 和公钥 Secret
 
-目前公司 JWT 校验实现支持 **RS256、RSA 公钥不少于 2048 位**。上层既有登录 token 若算法、issuer 或 audience 不匹配，必须由上层验证后签发下层认可的短期内部 JWT；不能直接把任意平台 token 转发过来。内部 JWT 必须保留真实用户 ID，claim 使用 `staffuserid`，为空时回退到 `sub`；有 `exp`，并匹配配置的 `iss/aud/kid`。不接受 `X-User-Id` 覆盖身份。JWT 接入细节见 [接入方案](../../docs/publish-devops-integration.md)。
+当前平台操作器认证支持 **RS256、RSA 公钥不少于 2048 位**，并支持读取 Setting 共用 Redis 中的个人 PAT。Publish 完成业务权限后透传当前调用者的 JWT/PAT，操作器使用同一个 Bearer Token 认证，不签发内部 JWT，不接受 `X-User-Id` 覆盖身份。JWT 必须保留真实用户 ID，claim 使用 `staffuserid`，并匹配配置的 `exp/iss/aud/kid`。JWT/PAT 接入细节见 [认证说明](../../docs/authentication.md)。
 
 仅从可信来源取得**公钥**，不把签名私钥或真实 JWT 放进仓库。使用当前 kubectl context 执行：
 
@@ -124,18 +124,18 @@ Helm 的 release Secret 授权实际覆盖这个业务 Namespace 的所有 Secre
 
 ## 接入验收
 
-先在本地转发控制器，使用上层签发的短期 JWT 文件。这里不自动生成或打印 token：
+先在本地转发控制器，使用调用者自己的 JWT/PAT。这里不自动生成或打印 token：
 
 ```bash
-kubectl -n olixops-platform port-forward svc/olixops-k8s-ctl-platform 8091:8091
+kubectl -n olixops-platform port-forward svc/olixops-k8s-ctl-platform 8901:8901
 # 在另一终端执行，默认仅查询：
 python3 deployments/platform/scripts/smoke.py \
-  --base-url http://127.0.0.1:8091 --token-file /secure/path/platform.jwt \
+  --base-url http://127.0.0.1:8901 --token-file /secure/path/platform.jwt \
   --cluster-id poc --namespace developer-demo
 
 # 显式执行隔离 ConfigMap 的校验、创建、查询、更新和删除：
 python3 deployments/platform/scripts/smoke.py \
-  --base-url http://127.0.0.1:8091 --token-file /secure/path/platform.jwt \
+  --base-url http://127.0.0.1:8901 --token-file /secure/path/platform.jwt \
   --cluster-id poc --namespace developer-demo --write-test
 ```
 

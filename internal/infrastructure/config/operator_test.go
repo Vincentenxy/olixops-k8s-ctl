@@ -35,7 +35,7 @@ func TestClusterIdentityAndHTTPConfig(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			dir := t.TempDir()
-			require.NoError(t, os.WriteFile(filepath.Join(dir, "config.yaml"), []byte("server:\n  port: 8091\n"+tc.extra), 0600))
+			require.NoError(t, os.WriteFile(filepath.Join(dir, "config.yaml"), []byte("server:\n  port: 8901\n"+tc.extra), 0600))
 			c, e := Load(dir)
 			if tc.fail {
 				require.Error(t, e)

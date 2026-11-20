@@ -13,7 +13,7 @@ func TestPodExecAuthorizationConfiguration(t *testing.T) {
 		t.Run("authorization="+value, func(t *testing.T) {
 			t.Setenv("POD_EXEC_AUTHORIZATION_ENABLED", "")
 			dir := t.TempDir()
-			body := "server:\n  host: 127.0.0.1\n  port: 8091\n"
+			body := "server:\n  host: 127.0.0.1\n  port: 8901\n"
 			if value != "" {
 				body += "pod-exec:\n  authorization-enabled: " + value + "\n"
 			}
@@ -31,6 +31,38 @@ func TestPodExecAuthorizationConfiguration(t *testing.T) {
 	}
 }
 
+func TestApplicationModeConfiguration(t *testing.T) {
+	dir := t.TempDir()
+	body := "app:\n  mode: operator\noperator:\n  max-clusters: 4\nserver:\n  host: 127.0.0.1\n  port: 8901\n"
+	if err := os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(body), 0600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.App.Mode != ModeOperator || cfg.Operator.MaxClusters != 4 {
+		t.Fatalf("mode=%q max-clusters=%d", cfg.App.Mode, cfg.Operator.MaxClusters)
+	}
+
+	if err := os.WriteFile(filepath.Join(dir, "config.yaml"), []byte("app:\n  mode: invalid\nserver:\n  port: 8901\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = Load(dir); err == nil || !strings.Contains(err.Error(), "app.mode must be standalone or operator") {
+		t.Fatalf("invalid app.mode was accepted: %v", err)
+	}
+}
+
+func TestLoadRequiresSingleConfigYAML(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "config.yml"), []byte("server:\n  host: 127.0.0.1\n  port: 8901\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Load(dir); err == nil || !strings.Contains(err.Error(), "config.yaml") {
+		t.Fatalf("config.yml must not be selected as the runtime configuration: %v", err)
+	}
+}
+
 func TestDownloadPublicURL(t *testing.T) {
 	for _, tc := range []struct {
 		value string
@@ -38,7 +70,7 @@ func TestDownloadPublicURL(t *testing.T) {
 	}{
 		{"", true},
 		{"https://example.test/k8sctl", true},
-		{"http://127.0.0.1:8091", true},
+		{"http://127.0.0.1:8901", true},
 		{"http://example.test/k8sctl", false},
 		{"https://user:password@example.test", false},
 		{"https://example.test?token=value", false},
@@ -48,7 +80,7 @@ func TestDownloadPublicURL(t *testing.T) {
 		t.Run(tc.value, func(t *testing.T) {
 			t.Setenv("SERVER_PUBLIC_URL", "")
 			dir := t.TempDir()
-			body := "server:\n  host: 127.0.0.1\n  port: 8091\n  public-url: " + strconv.Quote(tc.value) + "\n"
+			body := "server:\n  host: 127.0.0.1\n  port: 8901\n  public-url: " + strconv.Quote(tc.value) + "\n"
 			if err := os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(body), 0600); err != nil {
 				t.Fatal(err)
 			}
@@ -85,7 +117,7 @@ func TestControlAPIKeyFile(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			body := "server:\n  host: 0.0.0.0\n  port: 8091\ncontrol:\n  api-key: " + strconv.Quote(tc.directKey) + "\n  api-key-file: " + strconv.Quote(keyPath) + "\n"
+			body := "server:\n  host: 0.0.0.0\n  port: 8901\ncontrol:\n  api-key: " + strconv.Quote(tc.directKey) + "\n  api-key-file: " + strconv.Quote(keyPath) + "\n"
 			if err := os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(body), 0o600); err != nil {
 				t.Fatal(err)
 			}
@@ -111,30 +143,30 @@ func TestControlAPIKeyFile(t *testing.T) {
 
 func TestAuthenticationConfigEnvironment(t *testing.T) {
 	dir := t.TempDir()
-	err := os.WriteFile(filepath.Join(dir, "config.yaml"), []byte("server:\n  host: 0.0.0.0\n  port: 8091\n"), 0600)
+	err := os.WriteFile(filepath.Join(dir, "config.yaml"), []byte("server:\n  host: 0.0.0.0\n  port: 8901\n"), 0600)
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("AUTH_ENABLED", "true")
-	t.Setenv("AUTH_COMPANY_ENABLED", "true")
-	t.Setenv("AUTH_COMPANY_ISSUER", "company")
-	t.Setenv("AUTH_COMPANY_AUDIENCE", "k8s-ctl")
-	t.Setenv("AUTH_COMPANY_KEY_ID", "company-v1")
-	t.Setenv("AUTH_COMPANY_PUBLIC_KEY_FILE", "/mounted/company.pem")
+	t.Setenv("AUTH_JWT_ENABLED", "true")
+	t.Setenv("AUTH_JWT_ISSUER", "platform")
+	t.Setenv("AUTH_JWT_AUDIENCE", "k8s-ctl")
+	t.Setenv("AUTH_JWT_KEY_ID", "platform-v1")
+	t.Setenv("AUTH_JWT_PUBLIC_KEY", "fixture-public-key-content")
 	t.Setenv("AUTH_PAT_ENABLED", "true")
-	t.Setenv("AUTH_PAT_DATABASE_PATH", "/data/auth.db")
+	t.Setenv("AUTH_PAT_ENABLED", "true")
 	cfg, err := Load(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !cfg.Auth.Enabled || !cfg.Auth.Company.Enabled || cfg.Auth.Company.Issuer != "company" || cfg.Auth.Company.Audience != "k8s-ctl" || cfg.Auth.Company.KeyID != "company-v1" || cfg.Auth.Company.PublicKeyFile != "/mounted/company.pem" || !cfg.Auth.PAT.Enabled || cfg.Auth.PAT.DatabasePath != "/data/auth.db" {
+	if !cfg.Auth.Enabled || !cfg.Auth.JWT.Enabled || cfg.Auth.JWT.Issuer != "platform" || cfg.Auth.JWT.Audience != "k8s-ctl" || cfg.Auth.JWT.KeyID != "platform-v1" || cfg.Auth.JWT.PublicKey != "fixture-public-key-content" || !cfg.Auth.PAT.Enabled {
 		t.Fatal("authentication environment configuration not loaded")
 	}
 }
 
 func TestJWTModeDoesNotRequireLegacyControlSecret(t *testing.T) {
 	dir := t.TempDir()
-	body := "server:\n  host: 0.0.0.0\n  port: 8091\nauth:\n  enabled: true\ncontrol:\n  api-key-file: " + strconv.Quote(filepath.Join(dir, "missing-api-key")) + "\n"
+	body := "server:\n  host: 0.0.0.0\n  port: 8901\nauth:\n  enabled: true\ncontrol:\n  api-key-file: " + strconv.Quote(filepath.Join(dir, "missing-api-key")) + "\n"
 	if err := os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(body), 0600); err != nil {
 		t.Fatal(err)
 	}
@@ -158,7 +190,7 @@ func TestJWTModeDoesNotRequireLegacyControlSecret(t *testing.T) {
 func TestSystemShellDoesNotShadowTerminalDefaults(t *testing.T) {
 	t.Setenv("SHELL", "/bin/zsh")
 	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "config.yaml"), []byte("server:\n  host: 127.0.0.1\n  port: 8091\n"), 0600); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "config.yaml"), []byte("server:\n  host: 127.0.0.1\n  port: 8901\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
 	cfg, err := Load(dir)

@@ -3,9 +3,10 @@ package router
 import (
 	"context"
 	"fmt"
-	"github.com/google/uuid"
 	"net/http"
 	"time"
+
+	"github.com/google/uuid"
 
 	"github.com/gin-gonic/gin"
 
@@ -108,7 +109,21 @@ func newRouter(cfg *config.Config, catalog *catalogapp.Service, auth *authapp.Se
 							response.AbortWithHTTPStatus(c, 401)
 							return
 						}
-						response.Success(c, gin.H{"clusterId": cfg.ClusterID(), "runtimeId": runtimeID, "version": cfg.App.Version, "apiVersion": "v1", "http": true, "mcp": cfg.MCP.Enabled, "kubernetesWrites": cfg.Kubernetes.WriteEnabled, "mcpWrites": cfg.MCP.Enabled && cfg.MCP.WriteEnabled, "podExec": cfg.PodExec.Enabled, "terminal": cfg.Shell.Enabled && cfg.PodExec.Enabled, "files": cfg.FilesEnabled(), "catalog": catalog != nil})
+						response.Success(c,
+							gin.H{"clusterId": cfg.ClusterID(),
+								"runtimeId":        runtimeID,
+								"version":          cfg.App.Version,
+								"apiVersion":       "v1",
+								"http":             true,
+								"mcp":              cfg.MCP.Enabled,
+								"kubernetesWrites": cfg.Kubernetes.WriteEnabled,
+								"mcpWrites":        cfg.MCP.Enabled && cfg.MCP.WriteEnabled,
+								"podExec":          cfg.PodExec.Enabled,
+								"terminal":         cfg.Shell.Enabled && cfg.PodExec.Enabled,
+								"files":            cfg.FilesEnabled(),
+								"catalog":          catalog != nil,
+							},
+						)
 					})
 				}
 			}
@@ -124,7 +139,15 @@ func newRouter(cfg *config.Config, catalog *catalogapp.Service, auth *authapp.Se
 
 func registerMCP(pub *gin.RouterGroup, cfg *config.Config, service *application.ClusterService, catalog *catalogapp.Service) {
 	if cfg.MCP.Enabled {
-		mcpHandler := mcpiface.NewHandler(service, cfg.App.Version, mcpiface.Options{ShellEnabled: cfg.Shell.Enabled, DiagnosticsOnly: cfg.MCP.DiagnosticsOnly, PodExecEnabled: cfg.PodExec.Enabled, Catalog: catalog, WriteEnabled: cfg.MCP.WriteEnabled, WriteTimeout: time.Duration(cfg.Kubernetes.CommandTimeoutSecond) * time.Second})
+		mcpHandler := mcpiface.NewHandler(service,
+			cfg.App.Version, mcpiface.Options{ShellEnabled: cfg.Shell.Enabled,
+				DiagnosticsOnly: cfg.MCP.DiagnosticsOnly,
+				PodExecEnabled:  cfg.PodExec.Enabled,
+				Catalog:         catalog,
+				WriteEnabled:    cfg.MCP.WriteEnabled,
+				WriteTimeout:    time.Duration(cfg.Kubernetes.CommandTimeoutSecond) * time.Second,
+			},
+		)
 		pub.Any("/mcp", func(c *gin.Context) {
 			ctx := context.WithValue(c.Request.Context(), logger.TraceIDKey, c.GetString(string(logger.TraceIDKey)))
 			mcpHandler.ServeHTTP(c.Writer, c.Request.WithContext(ctx))

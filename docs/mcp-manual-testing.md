@@ -9,38 +9,31 @@
 
 | 服务模式 | MCP 地址 | 认证 | 工具范围 |
 | --- | --- | --- | --- |
-| 本地开发人员诊断实例（本文推荐） | `http://127.0.0.1:8091/api/v1/mcp` | Bearer PAT/JWT | 启用 exec 后只有 `get_pod_logs`、`exec_pod_command` |
+| 本地开发人员诊断实例（本文推荐） | `http://127.0.0.1:8901/api/v1/mcp` | Bearer PAT/JWT | 启用 exec 后只有 `get_pod_logs`、`exec_pod_command` |
 | 集群开发人员诊断实例，经现有 Higress | `https://efficient-lab.qiuer.net/k8sctl/api/v1/mcp` | Bearer PAT/JWT | 同上；需已更新镜像、配置和 sidecar |
 | 认证后的完整管理实例 | `/api/v1/mcp`，按部署补域名/前缀 | Bearer PAT/JWT | 按配置提供管理工具，不适合作为普通开发人员的诊断入口 |
 | 旧兼容实例，`auth.enabled=false` | `/api/v1/pub/mcp`，按部署补域名/前缀 | 公开入口 | 原有管理工具；不能用于本文受控 exec 测试 |
 
 传输方式均为 **Streamable HTTP**。不要填写健康检查 URL、`/sse` 或上游 `127.0.0.1:8082/mcp`。客户端只连接 k8s-ctl，服务器内部如何调用上游不影响客户端配置。
 
-本文端口 8091 是配置示例，不代表现有进程已加载新代码。此前自动化测试使用的临时实例与 PAT 不作为长期接入配置，测试 PAT 已撤销，需要签发新的个人 PAT。
+本文端口 8901 是当前统一配置；是否生效仍以当前进程启动日志和健康检查为准。此前自动化测试使用的临时实例与 PAT 不作为长期接入配置，测试 PAT 已撤销，需要签发新的个人 PAT。
 
 ## 2. 管理员：准备本地服务
 
 这部分由平台维护者完成一次，普通开发人员从第 4 节接入即可。所有服务端选项直接写 YAML，密钥通过文件提供。
 
-### 2.1 准备签名密钥
+### 2.1 准备平台认证
 
-在项目根目录操作。已有密钥请继续使用，不要为重启而重新生成，否则旧 PAT 会失效。首次创建方法见 [认证接入说明：本地准备与首个 PAT](authentication.md#本地准备与首个-pat)。确认存在：
-
-```text
-.local/auth/pat-private.pem
-.local/auth/pat-public.pem
-```
-
-私钥、PAT、SQLite 数据库和 kubeconfig 都不要提交到 Git。
+平台 JWT/PAT 的 RSA 公钥和 Token 元数据由服务维护者注入。个人 PAT 在 Setting 的个人令牌功能中创建、撤销和管理，k8s-ctl 不生成 PAT、不读取 PAT 私钥，也不保存 PAT 数据库；它只用 `auth.pat.public-key` 本地验签，不连接 Setting Redis。公钥通过环境变量、挂载文件或 Secret 提供，不能提交到 Git。
 
 ### 2.2 修改真正会被加载的配置
 
-程序从当前工作目录读取 `./configs/config.yaml`，**不会自动读取** `config.diagnostics.example.yaml`。将下面配置合并到现有 `configs/config.yaml`，同名顶层配置块只保留一份；无需改动现有 kubeconfig 文件内容。
+程序从当前工作目录读取 `./configs/config.yaml`。将 `app.mode` 设为 `standalone`，再按本页启用诊断配置；同名顶层配置块只保留一份，无需改动现有 kubeconfig 文件内容。
 
 ```yaml
 server:
   host: 127.0.0.1
-  port: 8091
+  port: 8901
   mode: debug
 kubernetes:
   in-cluster: false
@@ -58,20 +51,22 @@ catalog:
   enabled: false
 auth:
   enabled: true
-  company:
+  jwt:
     enabled: false
+    public-key: ""
+    issuer: ""
+    audience: ""
+    key-id: ""
   pat:
     enabled: true
-    issuer: k8s-ctl
-    audience: k8s-ctl
-    key-id: pat-v1
-    private-key-file: .local/auth/pat-private.pem
-    public-key-file: .local/auth/pat-public.pem
-    database-path: ./data/auth.db
+    public-key: ""
+    issuer: efficient-platform
+    audience: platform-api
+    key-id: platform-pat-v1
 pod-exec:
   enabled: true
   mode: managed
-  binary: /Users/vincent/Desktop/codes.nosync/olixops-k8s-ctl/.local/kubernetes-mcp-bin/kubernetes-mcp-server
+  binary: /usr/local/bin/kubernetes-mcp-server
   grants:
     - user-id: diagnostic-developer
       namespace: env-vault
@@ -87,40 +82,31 @@ pod-exec:
 
 必须把 `REPLACE_WITH_CURRENT_POD_UID` 改为当前目标的真实 UID；Pod 名称和容器名也需确认。管理员可通过已有管理 MCP 的资源查询工具核对；不要求开发人员取得 Kubernetes 凭据。上次测试的 Pod UID 为 `49b4db43-e010-4ad7-8f9e-1b4080b4e576`，仅用于历史核对，Pod 重建后不能继续沿用。
 
-`diagnostic-developer` 是示例身份，PAT 的 `--user-id` 必须与 grant 完全一致；正式使用时换成核实过归属的稳定员工 ID。grant 按用户、Namespace、Pod 名称、UID、容器、动作和文件逐项匹配。这里仅授权表中的六种动作，其他固定动作也不会自动放开。
+`diagnostic-developer` 是示例身份，调用者 PAT 的真实用户 ID 必须与 grant 完全一致；正式使用时换成核实过归属的稳定员工 ID。grant 按用户、Namespace、Pod 名称、UID、容器、动作和文件逐项匹配。这里仅授权表中的六种动作，其他固定动作也不会自动放开。
 
 `managed` 模式在服务端启动官方 Kubernetes MCP Server **v0.1.2** 的 stdio 子进程。上面的二进制路径是本机已验证的位置，换机器需自行准备该版本并修改路径；不会自动下载或拉镜像。主服务和子进程使用同一 Provider 的单集群快照，开发人员客户端不接触该快照。
 
 虽然这些动作以诊断为目的，Kubernetes `pods/exec` 本身属于写请求，因此两个 write-enabled 都要开启。`diagnostics-only: true` 会隐藏管理工具及管理 REST，并停用目录后台任务；不要仅开启 exec 而遗漏此开关。
 
-### 2.3 签发本次使用的 PAT
+### 2.3 准备本次使用的 PAT
 
-配置完成并准备好密钥后，在项目根目录执行：
-
-注意必须同时设置 `auth.enabled: true` 和 `auth.pat.enabled: true`，字段名是 `enabled`，不是 `enable`。只打开 PAT 子开关仍会报 `auth and PAT must be enabled`；修改的是 `--config-dir` 指定目录中的 `config.yaml`。
-
-```bash
-go run ./cmd/pat --config-dir ./configs \
-  --user-id diagnostic-developer --name codex-manual-test --days 30
-```
-
-返回 JSON 中的 `token` 是本次 PAT，只返回一次，保存到个人凭据管理工具。签发命令必须访问主服务同一份配置、签名密钥和 `auth.db`，否则可能签名正确但数据库中没有记录。命令只能由管理员使用，开发人员不能靠自填 user-id 获得授权。
+配置完成后，在 Setting 的个人令牌页面或个人令牌接口中创建 PAT，并将令牌保存到本地凭据管理工具。调用者的真实用户 ID 必须与诊断 grant 一致。不要把 PAT 写入 YAML、Git、测试报告或 URL。k8s-ctl 的 `cmd/pat` 已退役，不能通过自填 user-id 生成令牌。
 
 ### 2.4 重启新程序
 
-先正常停止原来占用 8091 的服务，再在项目根目录启动当前代码：
+先正常停止旧的 k8s-ctl 进程，再在项目根目录使用唯一配置文件启动当前代码：
 
 ```bash
 go run ./cmd
 ```
 
-如果使用编译产物启动，需要重新编译，并保证工作目录下有 `configs/config.yaml`。主服务目前没有 `--config-dir` 参数；该参数属于上面的 PAT 管理命令。
+如果使用编译产物启动，需要重新编译，并保证工作目录下有 `configs/config.yaml`。默认不需要额外参数；`--config-dir` 仅用于明确指定包含唯一 `config.yaml` 的配置目录。
 
 确认启动成功：
 
 ```bash
-curl --fail http://127.0.0.1:8091/api/v1/pub/health
-curl --fail http://127.0.0.1:8091/api/v1/pub/ready
+curl --fail http://127.0.0.1:8901/api/v1/pub/health
+curl --fail http://127.0.0.1:8901/api/v1/pub/ready
 ```
 
 健康检查不校验 PAT。接着用个人 PAT 请求 `/api/v1/auth/me`，确认身份与 grant 的 user-id 一致；可使用客户端凭据功能发送 `Authorization: Bearer <PAT>`，不要把真实 token 写进共享文档。
@@ -129,13 +115,13 @@ curl --fail http://127.0.0.1:8091/api/v1/pub/ready
 
 如果这次重启的是集群服务，客户端改用第 1 节的 Higress 地址，并做以下替换：
 
-- 使用 [集群诊断配置示例](../configs/config.diagnostics.example.yaml)，替换真实用户和 Pod UID，开启 JWT/PAT；密钥路径使用 `/app/secrets/auth/`，数据库使用持久卷上的 `/data/auth.db`。
+- 使用 [统一配置](../configs/config.yaml)，替换真实用户和 Pod UID，开启 JWT/PAT；公钥通过环境变量、挂载文件或 Secret 注入，不配置本地 PAT 数据库。
 - `kubernetes.in-cluster: true`、`kubernetes.kubeconfig.source: in-cluster`、`pod-exec.mode: sidecar`，endpoint 为 `http://127.0.0.1:8082/mcp`。不使用本机 managed 二进制路径。
 - 主容器与上游 sidecar 在同一 Pod，使用同一 ServiceAccount。目标 Namespace 需要 `get pods`、`get pods/log`、`get/create pods/exec` 等必要 RBAC，示例见 [rbac.example.yaml](../deployments/components/kubernetes-mcp/rbac.example.yaml)。
 - [deployments/catalog.yaml](../deployments/catalog.yaml) 单独部署不包含 sidecar；需使用包含组件的 [Kustomize 入口](../deployments/kustomization.yaml)，并核对其中最终生成的配置。不要只修改未被部署引用的本地 YAML。
 - Higress 保留 `/k8sctl` 前缀重写规则，并转发 Authorization。认证开启后旧 `/api/v1/pub/mcp` 不再注册；健康探针路径不变。
 
-完整部署方法见 [Kubernetes MCP Server 接入](kubernetes-mcp-integration.md)；管理员签发 PAT 的容器命令见 [认证接入说明](authentication.md)。开发人员始终不需要 ServiceAccount token 或集群管理员角色。
+完整部署方法见 [Kubernetes MCP Server 接入](kubernetes-mcp-integration.md)；个人 PAT 由平台 Setting 管理，见 [认证接入说明](authentication.md)。开发人员始终不需要 ServiceAccount token 或集群管理员角色。
 
 ## 4. 开发人员：把 MCP 添加到 Codex
 
@@ -145,7 +131,7 @@ Codex 的配置文件为 `~/.codex/config.toml`，在现有文件中添加下面
 
 ```toml
 [mcp_servers.k8s_ctl_diagnostics]
-url = "http://127.0.0.1:8091/api/v1/mcp"
+url = "http://127.0.0.1:8901/api/v1/mcp"
 bearer_token_env_var = "K8S_CTL_PAT"
 tool_timeout_sec = 60
 ```
@@ -156,7 +142,7 @@ tool_timeout_sec = 60
 
 ```bash
 codex mcp add k8s_ctl_diagnostics \
-  --url http://127.0.0.1:8091/api/v1/mcp \
+  --url http://127.0.0.1:8901/api/v1/mcp \
   --bearer-token-env-var K8S_CTL_PAT
 ```
 
@@ -266,7 +252,7 @@ MCP 返回内容，智能体通过本地文件能力保存；服务端没有“�
 | --- | --- |
 | 重启后仍看不到 exec | 确认运行新编译产物；实际读取的是 configs/config.yaml；exec、MCP 和两个写开关均已开启 |
 | 服务启动提示 in-cluster/sidecar 约束 | 本机使用 managed；集群 sidecar 使用 in-cluster，不要混用 |
-| 新认证地址 401 | 确认 Codex 进程可读取 PAT；令牌未过期/撤销；与服务器使用同一签名密钥及数据库 |
+| 新认证地址 401 | 确认 Codex 进程可读取本人 JWT/PAT；令牌未过期；JWT/PAT 对应公钥、issuer、audience 和 key-id 配置正确，并确认 Publish 的 PAT 状态与业务权限检查已通过 |
 | 旧公开地址 404 | 开启认证后是预期行为，改用 /api/v1/mcp，经过 Higress 加 /k8sctl |
 | 只能看到几十个管理工具 | 核对 MCP URL、服务配置和 diagnostics-only；重新连接获取清单 |
 | 日志和 exec 都被拒绝 | 核对 PAT 的真实 UserID、精确 grant、Pod UID、容器名、Namespace 参数和 RBAC |
