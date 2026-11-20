@@ -550,6 +550,7 @@ Helm 只接受受控的 `repo/chart` 或 `oci://...` 形式，先下载并渲染
 ## 配置、凭据和安全设计
 
 - kubeconfig 只能由 `internal/infrastructure/kubeconfig.Provider` 提供；文件 Provider 默认读取 `~/.kube/config`，InCluster Provider 使用当前 Pod 的 ServiceAccount。数据库 Provider 目前只有接口，未来必须负责加密存储、权限校验和轮换。
+- 每个 HTTP 请求都透传或生成 `X-Request-Id`，统一访问日志记录 `traceId`、方法、路径、状态、耗时和响应字节数；操作器注册失败额外记录集群 ID、kubeconfig 字节数、摘要前缀、错误类型及脱敏后的错误原因
 - kubeconfig、token、证书、Helm values 和完整 YAML 不写入日志；CLI 使用 0600 临时文件并在操作结束后清理。
 - `kubectl`/Helm 通过 `exec.CommandContext` 的参数数组调用，调用方不能拼接参数绕过白名单。
 - 静态 `allowed-namespaces` 已废弃，旧字段兼容读取但不生效；平台按服务权限授权并解析 Namespace。独立下层接口仍接收目标 Namespace，访问范围由授权扩展及 Kubernetes RBAC 约束。

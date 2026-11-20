@@ -212,6 +212,18 @@ func runOperator(cfg *config.Config) {
 	defer closeAuthentication()
 
 	factory := func(ctx context.Context, input operator.Input) (http.Handler, func(), error) {
+		fail := func(stage string, err error) (http.Handler, func(), error) {
+			logger.Error(
+				ctx,
+				"[operator.factory] runtime initialization failed",
+				zap.String("clusterId", input.ClusterID),
+				zap.String("stage", stage),
+				zap.String("errorType", fmt.Sprintf("%T", err)),
+				zap.Error(err),
+			)
+			return nil, nil, err
+		}
+
 		local := *cfg
 		local.Cluster.ID = input.ClusterID
 		local.Catalog.Cluster = input.ClusterID
@@ -219,20 +231,20 @@ func runOperator(cfg *config.Config) {
 		local.Kubernetes.Kubeconfig.Context = ""
 		local.Server.PublicURL = ""
 		if err := local.ValidatePodExec(); err != nil {
-			return nil, nil, err
+			return fail("validate-pod-exec", err)
 		}
 		provider, err := kubeconfig.NewMemoryProvider([]byte(input.Kubeconfig))
 		if err != nil {
-			return nil, nil, err
+			return fail("load-kubeconfig", err)
 		}
 		reference := kubeconfig.Reference{}
 		snapshot, err := kubeconfig.Snapshot(ctx, provider, reference)
 		if err != nil {
-			return nil, nil, err
+			return fail("snapshot-kubeconfig", err)
 		}
 		client, err := clusterk8s.New(local.Kubernetes, snapshot, clusterk8s.WithPodExecAuthorization(local.PodExec.AuthorizeTargets()))
 		if err != nil {
-			return nil, nil, err
+			return fail("create-kubernetes-client", err)
 		}
 		runner := execctl.New(execctl.Config{
 			Provider:       snapshot,
@@ -248,7 +260,7 @@ func runOperator(cfg *config.Config) {
 		if local.PodExec.Enabled {
 			backend, backendErr := k8smcp.NewManaged(local.PodExec.Binary, snapshot)
 			if backendErr != nil {
-				return nil, nil, backendErr
+				return fail("create-managed-mcp", backendErr)
 			}
 			serviceOptions = append(serviceOptions, application.WithPodExecutor(backend))
 		}
@@ -270,7 +282,7 @@ func runOperator(cfg *config.Config) {
 		handler, err := router.NewWithAuth(&local, service, nil, authentication)
 		if err != nil {
 			cleanup()
-			return nil, nil, err
+			return fail("create-router", err)
 		}
 		return handler, cleanup, nil
 	}

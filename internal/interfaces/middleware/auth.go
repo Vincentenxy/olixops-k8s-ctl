@@ -1,11 +1,15 @@
 package middleware
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
+	"net"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
@@ -65,6 +69,8 @@ func Authenticate(s Authenticator) gin.HandlerFunc {
 // AuthenticateHTTP protects registration as well as per-cluster routes before dispatch.
 func AuthenticateHTTP(s Authenticator, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		started := time.Now()
+		out := &accessResponseWriter{ResponseWriter: w, status: http.StatusOK}
 		id := r.Header.Get(RequestIDHeader)
 		if id == "" || len(id) > 128 || strings.ContainsAny(id, "\r\n") {
 			id = generateID()
@@ -73,8 +79,20 @@ func AuthenticateHTTP(s Authenticator, next http.Handler) http.Handler {
 		r = r.Clone(r.Context())
 		r.Header.Set(RequestIDHeader, id)
 		r = r.WithContext(context.WithValue(r.Context(), logger.TraceIDKey, id))
+		defer func() {
+			logger.Info(
+				r.Context(),
+				"http access",
+				zap.String("method", r.Method),
+				zap.String("path", r.URL.Path),
+				zap.Int("status", out.status),
+				zap.Int64("bytes", out.bytes),
+				zap.Duration("cost", time.Since(started)),
+				zap.String("clientIp", r.RemoteAddr),
+			)
+		}()
 		if r.Method == http.MethodGet && (r.URL.Path == "/api/v1/pub/health" || r.URL.Path == "/api/v1/pub/ready") {
-			next.ServeHTTP(w, r)
+			next.ServeHTTP(out, r)
 			return
 		}
 		ctx, status := authenticate(r, s)
@@ -83,16 +101,82 @@ func AuthenticateHTTP(s Authenticator, next http.Handler) http.Handler {
 			if status == 401 {
 				w.Header().Set("WWW-Authenticate", `Bearer realm="k8s-ctl"`)
 			}
-			w.Header().Set("Content-Type", "application/json")
-			w.Header().Set("Cache-Control", "no-store")
-			w.WriteHeader(status)
+			out.Header().Set("Content-Type", "application/json")
+			out.Header().Set("Cache-Control", "no-store")
+			out.WriteHeader(status)
 			reason := "unauthenticated"
 			if status == 503 {
 				reason = "upstream_unavailable"
 			}
-			_ = json.NewEncoder(w).Encode(response.Response{Code: status, Message: http.StatusText(status), Data: map[string]string{"reason": reason}})
+			_ = json.NewEncoder(out).Encode(response.Response{Code: status, Message: http.StatusText(status), Data: map[string]string{"reason": reason}})
 			return
 		}
-		next.ServeHTTP(w, r.WithContext(ctx))
+		next.ServeHTTP(out, r.WithContext(ctx))
 	})
+}
+
+// accessResponseWriter records the outer HTTP result without breaking streaming,
+// hijacking or server push used by file and terminal endpoints.
+type accessResponseWriter struct {
+	http.ResponseWriter
+	status      int
+	bytes       int64
+	wroteHeader bool
+}
+
+func (w *accessResponseWriter) WriteHeader(status int) {
+	if w.wroteHeader {
+		return
+	}
+	w.wroteHeader = true
+	w.status = status
+	w.ResponseWriter.WriteHeader(status)
+}
+
+func (w *accessResponseWriter) Write(payload []byte) (int, error) {
+	if !w.wroteHeader {
+		w.WriteHeader(http.StatusOK)
+	}
+	n, err := w.ResponseWriter.Write(payload)
+	w.bytes += int64(n)
+	return n, err
+}
+
+func (w *accessResponseWriter) Flush() {
+	if !w.wroteHeader {
+		w.WriteHeader(http.StatusOK)
+	}
+	if flusher, ok := w.ResponseWriter.(http.Flusher); ok {
+		flusher.Flush()
+	}
+}
+
+func (w *accessResponseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	hijacker, ok := w.ResponseWriter.(http.Hijacker)
+	if !ok {
+		return nil, nil, errors.New("response writer does not support hijacking")
+	}
+	return hijacker.Hijack()
+}
+
+func (w *accessResponseWriter) Push(target string, options *http.PushOptions) error {
+	pusher, ok := w.ResponseWriter.(http.Pusher)
+	if !ok {
+		return http.ErrNotSupported
+	}
+	return pusher.Push(target, options)
+}
+
+func (w *accessResponseWriter) ReadFrom(source io.Reader) (int64, error) {
+	if !w.wroteHeader {
+		w.WriteHeader(http.StatusOK)
+	}
+	if readerFrom, ok := w.ResponseWriter.(io.ReaderFrom); ok {
+		n, err := readerFrom.ReadFrom(source)
+		w.bytes += n
+		return n, err
+	}
+	n, err := io.Copy(w.ResponseWriter, source)
+	w.bytes += n
+	return n, err
 }

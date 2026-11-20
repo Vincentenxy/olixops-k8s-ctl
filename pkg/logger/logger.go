@@ -72,6 +72,28 @@ func Info(ctx context.Context, msg string, fields ...zap.Field) {
 	sugared.Info(msg, fields...)
 }
 
+// Debug 打印 debug 级别日志，并自动携带当前请求的 trace-id
+func Debug(ctx context.Context, msg string, fields ...zap.Field) {
+	if sugared == nil {
+		return
+	}
+	if f := traceField(ctx); f != nil {
+		fields = append([]zap.Field{*f}, fields...)
+	}
+	sugared.Debug(msg, fields...)
+}
+
+// Warn 打印 warn 级别日志，并自动携带当前请求的 trace-id
+func Warn(ctx context.Context, msg string, fields ...zap.Field) {
+	if sugared == nil {
+		return
+	}
+	if f := traceField(ctx); f != nil {
+		fields = append([]zap.Field{*f}, fields...)
+	}
+	sugared.Warn(msg, fields...)
+}
+
 func Error(ctx context.Context, msg string, fields ...zap.Field) {
 	if sugared == nil {
 		return

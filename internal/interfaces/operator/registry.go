@@ -4,7 +4,9 @@ package operator
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"regexp"
@@ -12,6 +14,7 @@ import (
 	"sync"
 
 	"github.com/google/uuid"
+	"go.uber.org/zap"
 	d "olixops-k8s-ctl/internal/domain/auth"
 	"olixops-k8s-ctl/pkg/logger"
 )
@@ -54,6 +57,25 @@ func result(w http.ResponseWriter, status int, reason string, data any) {
 }
 
 var clusterID = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$`)
+
+var debugURL = regexp.MustCompile(`(?i)https?://[^\s"'<>]+`)
+
+func configureDebugFields(request *http.Request, in Input) []zap.Field {
+	kubeconfigDigest := sha256.Sum256([]byte(in.Kubeconfig))
+	return []zap.Field{
+		zap.String("requestId", request.Header.Get("X-Request-Id")),
+		zap.String("clusterId", in.ClusterID),
+		zap.Int("kubeconfigBytes", len(in.Kubeconfig)),
+		zap.String("kubeconfigSha256Prefix", hex.EncodeToString(kubeconfigDigest[:6])),
+	}
+}
+
+func debugError(err error) string {
+	if err == nil {
+		return ""
+	}
+	return debugURL.ReplaceAllString(err.Error(), "<redacted-url>")
+}
 
 func (r *Registry) ServeHTTP(w http.ResponseWriter, q *http.Request) {
 	id := q.Header.Get("X-Request-Id")
@@ -119,32 +141,56 @@ func (r *Registry) configure(w http.ResponseWriter, q *http.Request) {
 	decoder := json.NewDecoder(http.MaxBytesReader(w, q.Body, 256*1024))
 	decoder.DisallowUnknownFields()
 	if decoder.Decode(&in) != nil || decoder.Decode(new(any)) != io.EOF || !clusterID.MatchString(in.ClusterID) || len(in.Kubeconfig) == 0 || len(in.Kubeconfig) > 128*1024 {
+		logger.Debug(
+			q.Context(),
+			"[operator.configure] input rejected",
+			zap.String("requestId", q.Header.Get("X-Request-Id")),
+			zap.String("reason", "invalid_argument"),
+		)
 		result(w, 400, "invalid_argument", nil)
 		return
 	}
 	in.AllowedNamespaces = nil
+	fields := configureDebugFields(q, in)
+	logger.Debug(
+		q.Context(),
+		"[operator.configure] input accepted",
+		fields...,
+	)
 	serialized, _ := json.Marshal(in)
 	digest := sha256.Sum256(serialized)
 	r.mu.Lock()
 	if r.closed {
 		r.mu.Unlock()
+		logger.Debug(q.Context(), "[operator.configure] rejected", append(fields, zap.String("reason", "operator_closed"))...)
 		result(w, 503, "operator_closed", nil)
 		return
 	}
 	old := r.entries[in.ClusterID]
 	if old != nil && old.digest == digest {
 		r.mu.Unlock()
+		logger.Debug(q.Context(), "[operator.configure] runtime already configured", fields...)
 		result(w, 200, "", map[string]string{"clusterId": in.ClusterID})
 		return
 	}
 	if old == nil && len(r.entries) >= r.max {
 		r.mu.Unlock()
+		logger.Warn(q.Context(), "[operator.configure] rejected", append(fields, zap.String("reason", "capacity_exceeded"))...)
 		result(w, 503, "capacity_exceeded", nil)
 		return
 	}
+	logger.Debug(q.Context(), "[operator.configure] runtime initialization started", fields...)
 	handler, cleanup, err := r.factory(q.Context(), in)
 	if err != nil {
 		r.mu.Unlock()
+		logger.Error(
+			q.Context(),
+			"[operator.configure] runtime initialization failed",
+			append(fields,
+				zap.String("errorType", fmt.Sprintf("%T", err)),
+				zap.String("error", debugError(err)),
+			)...,
+		)
 		result(w, 400, "invalid_cluster_configuration", nil)
 		return
 	}
@@ -160,6 +206,7 @@ func (r *Registry) configure(w http.ResponseWriter, q *http.Request) {
 	if closeOld {
 		old.close()
 	}
+	logger.Info(q.Context(), "[operator.configure] runtime initialized", fields...)
 	result(w, 200, "", map[string]string{"clusterId": in.ClusterID})
 }
 func (r *Registry) Close() {

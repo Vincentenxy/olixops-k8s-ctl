@@ -7,6 +7,7 @@ operator:
   max-clusters: 16
 
 server:
+  host: 127.0.0.1
   port: 8901
   public-url: ""
   mode: debug
@@ -46,13 +47,15 @@ kubernetes:
     path: ""
     reference: ""
     context: ""
-
+mcp:
+  enabled: false
+  write-enabled: false
+  diagnostics-only: false
 pod-exec:
   authorization-enabled: false
   enabled: true
   mode: managed
   binary: kubernetes-mcp-server
-
 shell:
   enabled: true
   interceptor:

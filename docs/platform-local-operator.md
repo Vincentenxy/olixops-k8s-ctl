@@ -33,7 +33,7 @@ flowchart LR
 
 配置相同的重复注册复用原 runtimeId 和终端。配置变化时创建新运行实例；旧请求执行完毕后释放旧终端管理器。不同集群分别构造 client-go、kubectl/Helm Runner、上游私有 MCP 执行器、终端 Manager 和文件引用状态。集群目录上限由 `operator.max-clusters` 配置，默认 16；终端上限按各集群配置，示例为 128/每用户 16，仍受现有校验范围限制。
 
-注册请求最多 256 KiB；kubeconfig 最多 128 KiB，仅支持内嵌证书/密钥/token，拒绝外部 CA/证书文件、tokenFile、exec/auth-provider、代理 URL 和 impersonation，包括未选中的上下文。此限制不是文件传输大小限制。Provider 仅存内存；需要 CLI/上游时使用现有 0600 临时文件并清理，不将集群凭据写入数据库或日志。
+注册请求最多 256 KiB；kubeconfig 最多 128 KiB，仅支持内嵌证书/密钥/token，拒绝外部 CA/证书文件、tokenFile、exec/auth-provider、代理 URL 和 impersonation，包括未选中的上下文。此限制不是文件传输大小限制。Provider 仅存内存；需要 CLI/上游时使用现有 0600 临时文件并清理，不将集群凭据写入数据库或日志。操作器外层和集群路由都会记录带 `traceId` 的访问日志；注册失败记录集群 ID、配置大小、摘要前缀和脱敏错误原因。
 
 ## 上层第一批能力
 
